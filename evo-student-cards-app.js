@@ -356,13 +356,14 @@
     return state.assignments.find((a) => a.id === state.activeAssignmentId) || null;
   }
 
-  function syncKnownFromProgress() {
-    state.known = new Set(
-      [...state.progressByCardId.values()]
-        .filter((p) => !!p.is_known)
-        .map((p) => p.card_id)
-    );
+function syncKnownFromProgress() {
+  // В student cards saved progress и session progress должны быть раздельны.
+  // progressByCardId = что уже сохранено в БД
+  // state.known = что выучено в ТЕКУЩЕЙ сессии
+  if (!(state.known instanceof Set)) {
+    state.known = new Set();
   }
+}
 
   function rebuildQueue(resetView) {
     state.filtered = state.cards.filter((c) => {
@@ -400,34 +401,39 @@
     }
   }
 
-  function syncActiveAssignmentLocalProgress() {
-    const assignment = getActiveAssignment();
-    if (!assignment) return;
+function syncActiveAssignmentLocalProgress() {
+  const assignment = getActiveAssignment();
+  if (!assignment) return;
 
-    const total = state.cards.length;
-    const knownCount = state.known.size;
-    const touched = state.progressByCardId.size;
+  const total = state.cards.length;
+  const knownCount = [...state.progressByCardId.values()].filter((p) => !!p.is_known).length;
+  const touched = state.progressByCardId.size;
 
-    let status = 'not_started';
-    if (total > 0 && knownCount >= total) {
-      status = 'completed';
-    } else if (touched > 0 || assignment.started_at) {
-      status = 'in_progress';
-    }
-
-    assignment.progress_percent = total > 0 ? Number(((knownCount * 100) / total).toFixed(2)) : 0;
-    assignment.status = status;
-
-    if ((status === 'in_progress' || status === 'completed') && !assignment.started_at) {
-      assignment.started_at = new Date().toISOString();
-    }
-    if (status === 'completed' && !assignment.completed_at) {
-      assignment.completed_at = new Date().toISOString();
-    }
-    if (status !== 'completed') {
-      assignment.completed_at = null;
-    }
+  let status = 'not_started';
+  if (total > 0 && knownCount >= total) {
+    status = 'completed';
+  } else if (touched > 0 || assignment.started_at) {
+    status = 'in_progress';
   }
+
+  assignment.progress_percent = total > 0
+    ? Number(((knownCount * 100) / total).toFixed(2))
+    : 0;
+
+  assignment.status = status;
+
+  if ((status === 'in_progress' || status === 'completed') && !assignment.started_at) {
+    assignment.started_at = new Date().toISOString();
+  }
+
+  if (status === 'completed' && !assignment.completed_at) {
+    assignment.completed_at = new Date().toISOString();
+  }
+
+  if (status !== 'completed') {
+    assignment.completed_at = null;
+  }
+}
 
   async function fetchBase() {
     const supabase = window.supabase;
@@ -521,39 +527,47 @@
     }
   }
 
-  async function fetchCardsAndProgress() {
-    const assignment = getActiveAssignment();
-    if (!assignment) {
-      state.cards = [];
-      state.progressByCardId = new Map();
-      syncKnownFromProgress();
-      rebuildQueue(true);
-      return;
-    }
-
-    await touchActiveAssignment();
-
-    const { data: cardsRows, error: cardsErr } = await window.supabase
-      .from('classroom_vocab_cards')
-      .select('id, module_id, word, translation, example, note, sort_order, created_at, updated_at')
-      .eq('module_id', assignment.module_id)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true });
-    if (cardsErr) throw cardsErr;
-
-    const { data: progressRows, error: progressErr } = await window.supabase
-      .from('classroom_vocab_card_progress')
-      .select('id, assignment_id, card_id, student_id, is_known, starred, last_reviewed_at, created_at, updated_at')
-      .eq('assignment_id', assignment.id)
-      .eq('student_id', state.userId);
-    if (progressErr) throw progressErr;
-
-    state.cards = cardsRows || [];
-    state.progressByCardId = new Map((progressRows || []).map((p) => [p.card_id, p]));
-    syncKnownFromProgress();
+async function fetchCardsAndProgress() {
+  const assignment = getActiveAssignment();
+  if (!assignment) {
+    state.cards = [];
+    state.progressByCardId = new Map();
+    state.known = new Set();
     rebuildQueue(true);
-    syncActiveAssignmentLocalProgress();
+    return;
   }
+
+  await touchActiveAssignment();
+
+  const { data: cardsRows, error: cardsErr } = await window.supabase
+    .from('classroom_vocab_cards')
+    .select('id, module_id, word, translation, example, note, sort_order, created_at, updated_at')
+    .eq('module_id', assignment.module_id)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (cardsErr) throw cardsErr;
+
+  const { data: progressRows, error: progressErr } = await window.supabase
+    .from('classroom_vocab_card_progress')
+    .select('id, assignment_id, card_id, student_id, is_known, starred, last_reviewed_at, created_at, updated_at')
+    .eq('assignment_id', assignment.id)
+    .eq('student_id', state.userId);
+  if (progressErr) throw progressErr;
+
+  state.cards = cardsRows || [];
+  state.progressByCardId = new Map((progressRows || []).map((p) => [p.card_id, p]));
+
+  // ВАЖНО:
+  // начинаем новую session queue с нуля,
+  // но сохранённый progress остаётся в progressByCardId и в статусе assignment
+  state.known = new Set();
+  state.idx = 0;
+  state.flipped = false;
+  state.hasCelebrated = false;
+
+  rebuildQueue(true);
+  syncActiveAssignmentLocalProgress();
+}
 
   async function reloadAll() {
     await fetchBase();
@@ -597,147 +611,160 @@
     syncActiveAssignmentLocalProgress();
   }
 
-  function renderLearn() {
-    const content = rootEl()?.querySelector('#sc-content');
-    const bar = rootEl()?.querySelector('#sc-bar');
-    if (!content || !bar) return;
+function renderLearn() {
+  const content = rootEl()?.querySelector('#sc-content');
+  const bar = rootEl()?.querySelector('#sc-bar');
+  if (!content || !bar) return;
 
-    if (!state.queue.length || !state.baseIds.length) {
-      content.innerHTML = `<div class="sc-empty">No cards match the current filter.</div>`;
-      bar.style.width = '0%';
-      return;
-    }
+  if (!state.queue.length || !state.baseIds.length) {
+    content.innerHTML = `<div class="sc-empty">No cards match the current filter.</div>`;
+    bar.style.width = '0%';
+    return;
+  }
 
-    skipKnownForward();
+  // НЕ вызываем skipKnownForward()
+  // Иначе prev/next и shuffle начинают ломаться
 
-    if (state.idx >= state.queue.length) {
-      if (state.known.size === state.baseIds.length) {
-        if (!state.hasCelebrated) {
-          celebrate();
-          state.hasCelebrated = true;
-        }
-        state.idx = Math.max(0, state.queue.length - 1);
-      } else {
-        const nextUnknown = state.queue.findIndex((c) => !state.known.has(c.id));
-        state.idx = nextUnknown === -1 ? Math.max(0, state.queue.length - 1) : nextUnknown;
+  if (state.idx >= state.queue.length) {
+    if (state.known.size >= state.baseIds.length) {
+      if (!state.hasCelebrated) {
+        celebrate();
+        state.hasCelebrated = true;
       }
+      state.idx = Math.max(0, state.queue.length - 1);
+    } else {
+      state.idx = Math.max(0, state.queue.length - 1);
     }
+  }
 
-    const c = state.queue[state.idx];
-    const progress = state.progressByCardId.get(c.id);
-    const starred = !!progress?.starred;
+  if (state.idx < 0) state.idx = 0;
 
-    bar.style.width = `${progressPct()}%`;
+  const c = state.queue[state.idx];
+  const progress = state.progressByCardId.get(c.id);
+  const starred = !!progress?.starred;
 
-    content.innerHTML = `
-      <div class="sc-card-stage" tabindex="0" aria-live="polite">
-        <div class="sc-card-inner ${state.flipped ? 'is-flipped' : ''}">
-          <div class="sc-face sc-front">${escapeHtml(c.word || '')}</div>
-          <div class="sc-face sc-back">${escapeHtml(c.translation || '')}</div>
-        </div>
+  // progress bar = прогресс текущей сессии
+  bar.style.width = `${progressPct()}%`;
+
+  content.innerHTML = `
+    <div class="sc-card-stage" tabindex="0" aria-live="polite">
+      <div class="sc-card-inner ${state.flipped ? 'is-flipped' : ''}">
+        <div class="sc-face sc-front">${escapeHtml(c.word || '')}</div>
+        <div class="sc-face sc-back">${escapeHtml(c.translation || '')}</div>
+      </div>
+    </div>
+
+    <div class="sc-under">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <button class="sc-btn sc-btn-secondary" type="button" id="sc-prev">←</button>
+        <button class="sc-btn sc-btn-secondary" type="button" id="sc-flip">Flip</button>
+        <button class="sc-btn sc-btn-secondary" type="button" id="sc-next">→</button>
+        <span class="sc-note" style="margin-left:12px;">${Math.min(state.known.size + 1, state.baseIds.length)} / ${state.baseIds.length}</span>
       </div>
 
-      <div class="sc-under">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <button class="sc-btn sc-btn-secondary" type="button" id="sc-prev">←</button>
-          <button class="sc-btn sc-btn-secondary" type="button" id="sc-flip">Flip</button>
-          <button class="sc-btn sc-btn-secondary" type="button" id="sc-next">→</button>
-          <span class="sc-note" style="margin-left:12px;">${Math.min(state.known.size + 1, state.baseIds.length)} / ${state.baseIds.length}</span>
-        </div>
-
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span class="sc-star" id="sc-star" title="Star/Unstar">${starred ? '★' : '☆'}</span>
-          <button class="sc-btn sc-btn-secondary" type="button" id="sc-bad">Don't know</button>
-          <button class="sc-btn sc-btn-primary" type="button" id="sc-good">I know</button>
-        </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="sc-star" id="sc-star" title="Star/Unstar">${starred ? '★' : '☆'}</span>
+        <button class="sc-btn sc-btn-secondary" type="button" id="sc-bad">Don't know</button>
+        <button class="sc-btn sc-btn-primary" type="button" id="sc-good">I know</button>
       </div>
+    </div>
 
-      ${(c.example || c.note) ? `
-        <div class="sc-grid" style="margin-top:14px;">
-          ${c.example ? `<div class="sc-card"><div class="sc-body"><div class="sc-label"><span>Example</span></div><div class="sc-note" style="white-space:pre-wrap;line-height:1.55;color:#111213;">${escapeHtml(c.example)}</div></div></div>` : ''}
-          ${c.note ? `<div class="sc-card"><div class="sc-body"><div class="sc-label"><span>Note</span></div><div class="sc-note" style="white-space:pre-wrap;line-height:1.55;color:#111213;">${escapeHtml(c.note)}</div></div></div>` : ''}
-        </div>
-      ` : ''}
-    `;
+    ${(c.example || c.note) ? `
+      <div class="sc-grid" style="margin-top:14px;">
+        ${c.example ? `<div class="sc-card"><div class="sc-body"><div class="sc-label"><span>Example</span></div><div class="sc-note" style="white-space:pre-wrap;line-height:1.55;color:#111213;">${escapeHtml(c.example)}</div></div></div>` : ''}
+        ${c.note ? `<div class="sc-card"><div class="sc-body"><div class="sc-label"><span>Note</span></div><div class="sc-note" style="white-space:pre-wrap;line-height:1.55;color:#111213;">${escapeHtml(c.note)}</div></div></div>` : ''}
+      </div>
+    ` : ''}
+  `;
 
-    content.querySelector('#sc-flip').onclick = () => {
+  content.querySelector('#sc-flip').onclick = () => {
+    state.flipped = !state.flipped;
+    renderLearn();
+  };
+
+  content.querySelector('#sc-prev').onclick = () => {
+    if (state.idx > 0) state.idx -= 1;
+    state.flipped = false;
+    renderLearn();
+  };
+
+  content.querySelector('#sc-next').onclick = () => {
+    if (state.idx < state.queue.length - 1) state.idx += 1;
+    state.flipped = false;
+    renderLearn();
+  };
+
+  content.querySelector('#sc-star').onclick = async () => {
+    try {
+      await saveCardProgress(c.id, { starred: !starred });
+      renderApp();
+    } catch (err) {
+      console.error('[student-cards] star error:', err);
+      showFlash('error', err?.message || 'Failed to update starred state.');
+    }
+  };
+
+  content.querySelector('#sc-good').onclick = async () => {
+    try {
+      await saveCardProgress(c.id, { is_known: true, touch: true });
+
+      // session progress
+      state.known.add(c.id);
+      state.idx += 1;
+      state.flipped = false;
+
+      renderApp();
+    } catch (err) {
+      console.error('[student-cards] save good error:', err);
+      showFlash('error', err?.message || 'Failed to save cards progress.');
+    }
+  };
+
+  content.querySelector('#sc-bad').onclick = async () => {
+    try {
+      await saveCardProgress(c.id, { is_known: false, touch: true });
+
+      // отправляем карту в конец очереди
+      state.queue.push(c);
+      state.idx += 1;
+      state.flipped = false;
+
+      renderApp();
+    } catch (err) {
+      console.error('[student-cards] save bad error:', err);
+      showFlash('error', err?.message || 'Failed to save cards progress.');
+    }
+  };
+
+  if (window.__studentCardsKeydown) {
+    document.removeEventListener('keydown', window.__studentCardsKeydown);
+  }
+
+  const keyHandler = (e) => {
+    if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
       state.flipped = !state.flipped;
       renderLearn();
-    };
-
-    content.querySelector('#sc-prev').onclick = () => {
-      state.idx = Math.max(0, state.idx - 1);
-      state.flipped = false;
-      renderLearn();
-    };
-
-    content.querySelector('#sc-next').onclick = () => {
-      state.idx = Math.min(state.idx + 1, state.queue.length);
-      state.flipped = false;
-      renderLearn();
-    };
-
-    content.querySelector('#sc-star').onclick = async () => {
-      try {
-        await saveCardProgress(c.id, { starred: !starred });
-        renderApp();
-      } catch (err) {
-        console.error('[student-cards] star error:', err);
-        showFlash('error', err?.message || 'Failed to update starred state.');
-      }
-    };
-
-    content.querySelector('#sc-good').onclick = async () => {
-      try {
-        await saveCardProgress(c.id, { is_known: true, touch: true });
-        state.idx += 1;
-        state.flipped = false;
-        renderApp();
-      } catch (err) {
-        console.error('[student-cards] save good error:', err);
-        showFlash('error', err?.message || 'Failed to save cards progress.');
-      }
-    };
-
-    content.querySelector('#sc-bad').onclick = async () => {
-      try {
-        await saveCardProgress(c.id, { is_known: false, touch: true });
-        state.queue.push(c);
-        state.idx += 1;
-        state.flipped = false;
-        renderApp();
-      } catch (err) {
-        console.error('[student-cards] save bad error:', err);
-        showFlash('error', err?.message || 'Failed to save cards progress.');
-      }
-    };
-
-    if (window.__studentCardsKeydown) {
-      document.removeEventListener('keydown', window.__studentCardsKeydown);
     }
 
-    const keyHandler = (e) => {
-      if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-      if (e.code === 'Space') {
-        e.preventDefault();
-        state.flipped = !state.flipped;
-        renderLearn();
-      }
-      if (e.key === 'ArrowRight') {
-        state.idx += 1;
-        state.flipped = false;
-        renderLearn();
-      }
-      if (e.key === 'ArrowLeft') {
-        state.idx = Math.max(0, state.idx - 1);
-        state.flipped = false;
-        renderLearn();
-      }
-    };
+    if (e.key === 'ArrowRight') {
+      if (state.idx < state.queue.length - 1) state.idx += 1;
+      state.flipped = false;
+      renderLearn();
+    }
 
-    window.__studentCardsKeydown = keyHandler;
-    document.addEventListener('keydown', keyHandler);
-  }
+    if (e.key === 'ArrowLeft') {
+      if (state.idx > 0) state.idx -= 1;
+      state.flipped = false;
+      renderLearn();
+    }
+  };
+
+  window.__studentCardsKeydown = keyHandler;
+  document.addEventListener('keydown', keyHandler);
+}
 
   function renderList() {
     const content = rootEl()?.querySelector('#sc-content');
