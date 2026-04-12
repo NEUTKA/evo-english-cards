@@ -786,32 +786,32 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
           tr.querySelector('[data-field="word"]').focus();
           };
 
-          tbody.addEventListener('click', async function (event) {
-          const btn = event.target.closest('button');
-          if (!btn) return;
-          const act = btn.getAttribute('data-act');
-          const tr = btn.closest('tr');
-          if (!tr) return;
-          const id = tr.getAttribute('data-id');
+tbody.addEventListener('click', async function (event) {
+  const btn = event.target.closest('button');
+  if (!btn) return;
+  const act = btn.getAttribute('data-act');
+  const tr = btn.closest('tr');
+  if (!tr) return;
+  const id = tr.getAttribute('data-id');
 
-          if (act === 'save' && id) {
-          await handleSaveCard(tr);
-          return;
+  if (act === 'save' && id) {
+    await handleSaveCard(tr);
+    return;
+  }
+  if (act === 'delete' && id) {
+    await handleDeleteCard(id);
+    return;
+  }
+  if (act === 'create') {
+    await handleCreateCard(tr);
+    return;
+  }
+  if (act === 'cancel') {
+    tr.remove();
+  }
+});
+          
           }
-          if (act === 'delete' && id) {
-          await handleDeleteCard(id);
-          return;
-          }
-          if (act === 'create') {
-          await handleCreateCard(tr);
-          return;
-          }
-          if (act === 'cancel') {
-          tr.remove();
-          }
-          }, { once: true });
-          }
-
           function renderModulePicker() {
           const activeModule = state.modules.find((m) => m.id === state.activeModuleId) || null;
           const studentsOptions = state.students.length
