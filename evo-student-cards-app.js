@@ -391,10 +391,11 @@ function syncKnownFromProgress() {
     }
   }
 
-  function progressPct() {
-    return (state.known.size / Math.max(1, state.baseIds.length)) * 100;
-  }
-
+function progressPct() {
+  return state.baseIds.length
+    ? (state.known.size / state.baseIds.length) * 100
+    : 0;
+}
   function skipKnownForward() {
     while (state.idx < state.queue.length && state.known.has(state.queue[state.idx].id)) {
       state.idx += 1;
@@ -1024,27 +1025,26 @@ function renderLearn() {
     const shuffleBtn = root.querySelector('#sc-shuffle');
     if (shuffleBtn) {
       shuffleBtn.onclick = () => {
-        for (let i = state.filtered.length - 1; i > 0; i--) {
-          const j = (Math.random() * (i + 1)) | 0;
-          [state.filtered[i], state.filtered[j]] = [state.filtered[j], state.filtered[i]];
-        }
-        state.baseIds = [...new Set(state.filtered.map((c) => c.id))];
-        state.queue = state.filtered.slice();
-        state.idx = 0;
-        state.flipped = false;
-        state.hasCelebrated = false;
-        renderLearn();
-      };
+for (let i = state.filtered.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [state.filtered[i], state.filtered[j]] = [state.filtered[j], state.filtered[i]];
     }
 
-    const starFilterBtn = root.querySelector('#sc-star-filter');
-    if (starFilterBtn) {
-      starFilterBtn.onclick = () => {
-        state.filterStarred = !state.filterStarred;
-        rebuildQueue(true);
-        renderApp();
-      };
-    }
+    // ПОЛНЫЙ сброс текущей учебной сессии
+    state.baseIds = [...new Set(state.filtered.map((c) => c.id))];
+    state.queue = state.filtered.slice();
+    state.known = new Set();
+    state.idx = 0;
+    state.flipped = false;
+    state.hasCelebrated = false;
+
+    // визуально сразу обнуляем progress bar
+    const bar = root.querySelector('#sc-bar');
+    if (bar) bar.style.width = '0%';
+
+    renderLearn();
+  };
+}
 
     const searchEl = root.querySelector('#sc-search');
     if (searchEl) {
