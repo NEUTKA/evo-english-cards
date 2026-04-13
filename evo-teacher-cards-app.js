@@ -38,7 +38,54 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
     clearInterval(t);
     cb();
     } else if (--tries <= 0) { clearInterval(t); } }, delay); } function showFlash(type, message) { state.flash={ type,
-      message }; renderApp(); } function formatDateTime(value) { if (!value) return 'No date' ; try { const d=new
+      message }; renderApp(); }
+
+function rememberButton(button) {
+  if (!button) return { text: '' };
+  return { text: button.textContent || '' };
+}
+
+function paintButton(button, tone, text) {
+  if (!button) return;
+  button.classList.remove('is-busy', 'is-success', 'is-error');
+  if (tone) button.classList.add(`is-${tone}`);
+  if (text != null) button.textContent = text;
+}
+
+function startButtonFeedback(button, busyText) {
+  const original = rememberButton(button);
+  if (button) {
+    button.disabled = true;
+    paintButton(button, 'busy', busyText || original.text);
+  }
+  return original;
+}
+
+function finishButtonFeedback(button, original, ok, doneText, delay = 1600) {
+  if (!button) return;
+  button.disabled = true;
+  paintButton(button, ok ? 'success' : 'error', doneText);
+
+  window.setTimeout(() => {
+    button.disabled = false;
+    button.classList.remove('is-busy', 'is-success', 'is-error');
+    button.textContent = original?.text || button.textContent;
+  }, delay);
+}
+
+function finishButtonFeedbackBySelector(selector, original, ok, doneText, delay = 1600) {
+  const button = rootEl()?.querySelector(selector);
+  if (!button) return;
+  finishButtonFeedback(button, original, ok, doneText, delay);
+}
+
+function buttonError(button, original, text) {
+  finishButtonFeedback(button, original || rememberButton(button), false, text || 'Failed');
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+} function formatDateTime(value) { if (!value) return 'No date' ; try { const d=new
       Date(value); if (Number.isNaN(d.getTime())) return 'No date' ; return d.toLocaleString(undefined, {
       year: 'numeric' , month: 'short' , day: 'numeric' , hour: '2-digit' , minute: '2-digit' }); } catch {
       return 'No date' ; } } function statusLabel(status) { if (status==='completed' ) return 'Completed' ; if
@@ -68,7 +115,16 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
       .tc-btn-primary{background:#111213;color:#fff} .tc-btn-primary:hover,.tc-link:hover{filter:brightness(1.05)}
       .tc-btn-secondary{background:#f8fbff;color:#175cd3;border:1px solid #dbe7f3}
       .tc-btn-danger{background:#fff2f2;color:#b42318;border:1px solid #fecaca}
-      .tc-btn:disabled{opacity:.65;cursor:not-allowed} .tc-note{color:#667085;font-size:14px}
+      .tc-btn:disabled{opacity:.65;cursor:not-allowed}
+      .tc-btn.is-busy{opacity:.92;cursor:wait}
+      .tc-btn.is-success{background:#22c55e !important;border-color:#22c55e !important;color:#fff !important}
+      .tc-btn.is-error{background:#ef4444 !important;border-color:#ef4444 !important;color:#fff !important}
+      .tc-note{color:#667085;font-size:14px}
+      .tc-group{display:grid;gap:14px}
+      .tc-group-head{padding:2px 4px 0}
+      .tc-group-kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#4EA9E7;font-weight:700;margin-bottom:6px}
+      .tc-group-title{margin:0;font-size:24px;line-height:1.15;color:#111213}
+      .tc-group-sub{margin-top:6px;color:#667085;font-size:15px}
       .tc-empty{padding:24px;border:1px dashed
       #cfd8e3;border-radius:14px;background:#fbfdff;color:#667085;text-align:center} .tc-error{padding:16px
       18px;border-radius:14px;background:#fff2f2;border:1px solid #fecaca;color:#b42318} .tc-success{padding:16px
@@ -540,14 +596,17 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
           const root = rootEl();
           if (!moduleId || !root) return;
 
+          const original = rememberButton(button);
           const select = root.querySelector('#tc-student-select');
           const studentId = select?.value || '';
           if (!studentId) {
-          showFlash('error', 'Please choose a student first.');
+          state.flash = { type: 'error', message: 'Please choose a student first.' };
+          renderApp();
+          finishButtonFeedbackBySelector('#tc-send-module', original, false, 'Choose student');
           return;
           }
 
-          button.disabled = true;
+          startButtonFeedback(button, 'Sending...');
           try {
           const { error } = await window.supabase.rpc('classroom_vocab_assign_module', {
           _module_id: moduleId,
@@ -555,12 +614,14 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
           });
           if (error) throw error;
           await fetchAssignmentsForModule(moduleId);
-          showFlash('success', 'Cards module was sent successfully.');
+          state.flash = { type: 'success', message: 'Cards module was sent successfully.' };
+          renderApp();
+          finishButtonFeedbackBySelector('#tc-send-module', original, true, 'Sent');
           } catch (err) {
           console.error('[teacher-cards] assign module error:', err);
-          showFlash('error', err?.message || 'Failed to send cards module.');
-          } finally {
-          button.disabled = false;
+          state.flash = { type: 'error', message: err?.message || 'Failed to send cards module.' };
+          renderApp();
+          finishButtonFeedbackBySelector('#tc-send-module', original, false, 'Failed');
           }
           }
 
@@ -570,7 +631,8 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
           const ok = await openConfirm('Remove cards from student?', 'The student assignment and their cards progress for this module will be removed.', 'Remove');
           if (!ok) return;
 
-          button.disabled = true;
+          const original = rememberButton(button);
+          startButtonFeedback(button, 'Removing...');
           try {
           const { error } = await window.supabase
           .from('classroom_vocab_assignments')
@@ -578,13 +640,18 @@ return String(value ?? '').replace(/[&<>"']/g, function (m) {
           .eq('id', assignmentId)
           .eq('teacher_id', state.userId);
           if (error) throw error;
+
+          finishButtonFeedback(button, original, true, 'Removed', 900);
+          await wait(900);
+
           await fetchAssignmentsForModule(state.activeModuleId);
-          showFlash('success', 'Cards assignment was removed.');
+          state.flash = { type: 'success', message: 'Cards assignment was removed.' };
+          renderApp();
           } catch (err) {
           console.error('[teacher-cards] delete assignment error:', err);
-          showFlash('error', err?.message || 'Failed to remove cards assignment.');
-          } finally {
-          button.disabled = false;
+          state.flash = { type: 'error', message: err?.message || 'Failed to remove cards assignment.' };
+          renderApp();
+          finishButtonFeedbackBySelector(`[data-action="remove-assignment"][data-assignment-id="${assignmentId}"]`, original, false, 'Failed');
           }
           }
 
@@ -886,15 +953,8 @@ tbody.addEventListener('click', async function (event) {
 });
           
           }
-          function renderModulePicker() {
+          function renderModulesPanel() {
           const activeModule = state.modules.find((m) => m.id === state.activeModuleId) || null;
-          const studentsOptions = state.students.length
-          ? state.students.map((student) => {
-          const label = ((student.full_name || '').trim() || student.email || 'Student') + ' — ' + (student.email ||
-          '');
-          return `<option value="${escapeHtml(student.id)}">${escapeHtml(label)}</option>`;
-          }).join('')
-          : '<option value="">No students available</option>';
 
           const modulesHtml = state.modules.length
           ? state.modules.map((mod) => {
@@ -912,28 +972,37 @@ tbody.addEventListener('click', async function (event) {
           </button>
           `;
           }).join('')
-          : `<div class="tc-empty">No cards modules yet. Create your first module to send vocabulary to a student.</div>
-          `;
+          : `<div class="tc-empty">No cards modules yet. Create your first module to send vocabulary to a student.</div>`;
 
           return `
           <div class="tc-card">
             <div class="tc-head">
               <div class="tc-kicker">Cards modules</div>
               <h2 class="tc-title" style="font-size:24px;">Teacher vocabulary modules</h2>
-              <div class="tc-sub">Create cards, manage module content, and send a module to a selected student.</div>
+              <div class="tc-sub">Create cards modules and choose which one is active for editing and preview.</div>
             </div>
             <div class="tc-body">
               <div class="tc-actions" style="margin-bottom:12px;">
                 <button class="tc-btn tc-btn-primary" type="button" id="tc-new-module">Create module</button>
-                <button class="tc-btn tc-btn-secondary" type="button" id="tc-rename-module" ${activeModule ? ''
-                  : 'disabled' }>Rename</button>
-                <button class="tc-btn tc-btn-danger" type="button" id="tc-delete-module" ${activeModule ? ''
-                  : 'disabled' }>Delete</button>
+                <button class="tc-btn tc-btn-secondary" type="button" id="tc-rename-module" ${activeModule ? '' : 'disabled'}>Rename</button>
+                <button class="tc-btn tc-btn-danger" type="button" id="tc-delete-module" ${activeModule ? '' : 'disabled'}>Delete</button>
               </div>
               <div class="tc-module-list">${modulesHtml}</div>
             </div>
           </div>
+          `;
+          }
 
+          function renderSendPanel() {
+          const activeModule = state.modules.find((m) => m.id === state.activeModuleId) || null;
+          const studentsOptions = state.students.length
+          ? state.students.map((student) => {
+          const label = ((student.full_name || '').trim() || student.email || 'Student') + ' — ' + (student.email || '');
+          return `<option value="${escapeHtml(student.id)}">${escapeHtml(label)}</option>`;
+          }).join('')
+          : '<option value="">No students available</option>';
+
+          return `
           <div class="tc-card">
             <div class="tc-head">
               <div class="tc-kicker">Send to student</div>
@@ -948,15 +1017,12 @@ tbody.addEventListener('click', async function (event) {
                 </label>
                 <label class="tc-label">
                   <span>Student</span>
-                  <select class="tc-select" id="tc-student-select" ${state.students.length && activeModule ? ''
-                    : 'disabled' }>${studentsOptions}</select>
+                  <select class="tc-select" id="tc-student-select" ${state.students.length && activeModule ? '' : 'disabled'}>${studentsOptions}</select>
                 </label>
               </div>
               <div class="tc-actions" style="margin-top:14px;">
-                <button class="tc-btn tc-btn-primary" type="button" id="tc-send-module" ${state.students.length &&
-                  activeModule ? '' : 'disabled' }>Send cards</button>
-                <div class="tc-note">The student will see this module inside the Cards tab on the student dashboard.
-                </div>
+                <button class="tc-btn tc-btn-primary" type="button" id="tc-send-module" ${state.students.length && activeModule ? '' : 'disabled'}>Send cards</button>
+                <div class="tc-note">The student will see this module inside the Cards tab on the student dashboard.</div>
               </div>
             </div>
           </div>
@@ -1041,38 +1107,49 @@ tbody.addEventListener('click', async function (event) {
               </div>
             </div>
 
-            ${renderModulePicker()}
-
-            <div class="tc-card">
-              <div class="tc-head">
-                <div class="tc-kicker">Cards study area</div>
-                <h2 class="tc-title" style="font-size:24px;">${escapeHtml(state.modules.find((m) => m.id ===
-                  state.activeModuleId)?.title || 'Cards')}</h2>
-                <div class="tc-sub">Use Learn mode to preview your module and Manage mode to edit the content before
-                  sending it.</div>
+            <div class="tc-group">
+              <div class="tc-group-head">
+                <div class="tc-group-kicker">Workspace</div>
+                <h2 class="tc-group-title">Module workspace</h2>
+                <div class="tc-group-sub">Select a module, preview it in Learn mode, and edit it in Manage mode.</div>
               </div>
-              <div class="tc-body">
-                <div class="tc-toolbar">
-                  <div class="tc-switch" role="tablist" aria-label="Cards mode">
-                    <button id="tc-mode-learn" type="button"
-                      class="${state.mode === 'learn' ? 'active' : ''}">Learn</button>
-                    <button id="tc-mode-manage" type="button"
-                      class="${state.mode === 'manage' ? 'active' : ''}">Manage</button>
-                  </div>
-                  <button class="tc-btn tc-btn-secondary" type="button" id="tc-shuffle" ${state.mode==='learn' &&
-                    state.cards.length ? '' : 'disabled' }>Shuffle</button>
-                  <div class="grow"></div>
-                  <input class="tc-input" id="tc-search" placeholder="Search cards…" value="${escapeHtml(state.term)}"
-                    ${state.activeModuleId ? '' : 'disabled' } />
+
+              ${renderModulesPanel()}
+
+              <div class="tc-card">
+                <div class="tc-head">
+                  <div class="tc-kicker">Cards study area</div>
+                  <h2 class="tc-title" style="font-size:24px;">${escapeHtml(state.modules.find((m) => m.id === state.activeModuleId)?.title || 'Cards')}</h2>
+                  <div class="tc-sub">Use Learn mode to preview your module and Manage mode to edit the content before sending it.</div>
                 </div>
-                <div id="tc-content" style="margin-top:14px;"></div>
-                <div class="tc-progress" style="margin-top:12px;">
-                  <div class="tc-bar" id="tc-bar"></div>
+                <div class="tc-body">
+                  <div class="tc-toolbar">
+                    <div class="tc-switch" role="tablist" aria-label="Cards mode">
+                      <button id="tc-mode-learn" type="button" class="${state.mode === 'learn' ? 'active' : ''}">Learn</button>
+                      <button id="tc-mode-manage" type="button" class="${state.mode === 'manage' ? 'active' : ''}">Manage</button>
+                    </div>
+                    <button class="tc-btn tc-btn-secondary" type="button" id="tc-shuffle" ${state.mode==='learn' && state.cards.length ? '' : 'disabled' }>Shuffle</button>
+                    <div class="grow"></div>
+                    <input class="tc-input" id="tc-search" placeholder="Search cards…" value="${escapeHtml(state.term)}" ${state.activeModuleId ? '' : 'disabled' } />
+                  </div>
+                  <div id="tc-content" style="margin-top:14px;"></div>
+                  <div class="tc-progress" style="margin-top:12px;">
+                    <div class="tc-bar" id="tc-bar"></div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            ${renderAssignmentsPanel()}
+            <div class="tc-group">
+              <div class="tc-group-head">
+                <div class="tc-group-kicker">Delivery</div>
+                <h2 class="tc-group-title">Student delivery</h2>
+                <div class="tc-group-sub">Send the active module to a student and track the assigned module state below.</div>
+              </div>
+
+              ${renderSendPanel()}
+              ${renderAssignmentsPanel()}
+            </div>
           </div>
           `;
 
