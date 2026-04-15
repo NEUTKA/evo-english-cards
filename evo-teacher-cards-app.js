@@ -120,11 +120,19 @@ function wait(ms) {
       .tc-btn.is-success{background:#22c55e !important;border-color:#22c55e !important;color:#fff !important}
       .tc-btn.is-error{background:#ef4444 !important;border-color:#ef4444 !important;color:#fff !important}
       .tc-note{color:#667085;font-size:14px}
-      .tc-group{display:grid;gap:14px}
-      .tc-group-head{padding:2px 4px 0}
+      .tc-group{background:#fff;border:1px solid #dfe5ec;border-radius:16px;box-shadow:0 10px 24px rgba(0,0,0,.05);overflow:hidden}
+      .tc-group-head{padding:18px 20px;border-bottom:1px solid #eef2f6;background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%)}
       .tc-group-kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#4EA9E7;font-weight:700;margin-bottom:6px}
       .tc-group-title{margin:0;font-size:24px;line-height:1.15;color:#111213}
       .tc-group-sub{margin-top:6px;color:#667085;font-size:15px}
+      .tc-group-body{padding:18px 20px 20px;display:grid;gap:18px}
+      .tc-section{display:grid;gap:14px}
+      .tc-section + .tc-section{padding-top:18px;border-top:1px solid #eef2f6}
+      .tc-section-head{display:grid;gap:6px}
+      .tc-section-kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#4EA9E7;font-weight:700}
+      .tc-section-title{margin:0;font-size:24px;line-height:1.15;color:#111213}
+      .tc-section-sub{color:#667085;font-size:15px}
+      .tc-study-shell{display:grid;gap:14px}
       .tc-empty{padding:24px;border:1px dashed
       #cfd8e3;border-radius:14px;background:#fbfdff;color:#667085;text-align:center} .tc-error{padding:16px
       18px;border-radius:14px;background:#fff2f2;border:1px solid #fecaca;color:#b42318} .tc-success{padding:16px
@@ -243,7 +251,7 @@ function wait(ms) {
       rotate(0deg)}100%{transform:translate3d(var(--x-end,0),calc(100vh + 30px),0) rotate(720deg)}} @media
       (max-width:760px){#${ROOT_ID}{padding:0 12px
       28px}.tc-head,.tc-body{padding:16px}.tc-title{font-size:24px}.tc-grid-2,.tc-grid-3{grid-template-columns:1fr}.tc-module-top,.tc-assignment-top,.tc-under{flex-direction:column;align-items:flex-start}.tc-toolbar{align-items:stretch}.tc-toolbar
-      .grow{display:none}} `; document.head.appendChild(style); } function setLoading() { const root=rootEl(); if
+      .grow{display:none}.tc-group-head,.tc-group-body{padding:16px}} `; document.head.appendChild(style); } function setLoading() { const root=rootEl(); if
       (!root) return; root.innerHTML=`<div class="tc-wrap">
       <div class="tc-card">
         <div class="tc-head">
@@ -975,21 +983,21 @@ tbody.addEventListener('click', async function (event) {
           : `<div class="tc-empty">No cards modules yet. Create your first module to send vocabulary to a student.</div>`;
 
           return `
-          <div class="tc-card">
-            <div class="tc-head">
-              <div class="tc-kicker">Cards modules</div>
-              <h2 class="tc-title" style="font-size:24px;">Teacher vocabulary modules</h2>
-              <div class="tc-sub">Create cards modules and choose which one is active for editing and preview.</div>
+          <section class="tc-section">
+            <div class="tc-section-head">
+              <div class="tc-section-kicker">Cards modules</div>
+              <h3 class="tc-section-title">Teacher vocabulary modules</h3>
+              <div class="tc-section-sub">Create cards modules and choose which one is active for editing and preview.</div>
             </div>
-            <div class="tc-body">
-              <div class="tc-actions" style="margin-bottom:12px;">
-                <button class="tc-btn tc-btn-primary" type="button" id="tc-new-module">Create module</button>
-                <button class="tc-btn tc-btn-secondary" type="button" id="tc-rename-module" ${activeModule ? '' : 'disabled'}>Rename</button>
-                <button class="tc-btn tc-btn-danger" type="button" id="tc-delete-module" ${activeModule ? '' : 'disabled'}>Delete</button>
-              </div>
-              <div class="tc-module-list">${modulesHtml}</div>
+
+            <div class="tc-actions">
+              <button class="tc-btn tc-btn-primary" type="button" id="tc-new-module">Create module</button>
+              <button class="tc-btn tc-btn-secondary" type="button" id="tc-rename-module" ${activeModule ? '' : 'disabled'}>Rename</button>
+              <button class="tc-btn tc-btn-danger" type="button" id="tc-delete-module" ${activeModule ? '' : 'disabled'}>Delete</button>
             </div>
-          </div>
+
+            <div class="tc-module-list">${modulesHtml}</div>
+          </section>
           `;
           }
 
@@ -1003,29 +1011,29 @@ tbody.addEventListener('click', async function (event) {
           : '<option value="">No students available</option>';
 
           return `
-          <div class="tc-card">
-            <div class="tc-head">
-              <div class="tc-kicker">Send to student</div>
-              <h2 class="tc-title" style="font-size:24px;">Assign cards module</h2>
-              <div class="tc-sub">Choose a linked student and send the selected cards module to their Cards tab.</div>
+          <section class="tc-section">
+            <div class="tc-section-head">
+              <div class="tc-section-kicker">Send to student</div>
+              <h3 class="tc-section-title">Assign cards module</h3>
+              <div class="tc-section-sub">Choose a linked student and send the selected cards module to their Cards tab.</div>
             </div>
-            <div class="tc-body">
-              <div class="tc-grid-2">
-                <label class="tc-label">
-                  <span>Selected module</span>
-                  <div class="tc-input" style="background:#f8fbff;">${escapeHtml(activeModule?.title || 'No module selected')}</div>
-                </label>
-                <label class="tc-label">
-                  <span>Student</span>
-                  <select class="tc-select" id="tc-student-select" ${state.students.length && activeModule ? '' : 'disabled'}>${studentsOptions}</select>
-                </label>
-              </div>
-              <div class="tc-actions" style="margin-top:14px;">
-                <button class="tc-btn tc-btn-primary" type="button" id="tc-send-module" ${state.students.length && activeModule ? '' : 'disabled'}>Send cards</button>
-                <div class="tc-note">The student will see this module inside the Cards tab on the student dashboard.</div>
-              </div>
+
+            <div class="tc-grid-2">
+              <label class="tc-label">
+                <span>Selected module</span>
+                <div class="tc-input" style="background:#f8fbff;">${escapeHtml(activeModule?.title || 'No module selected')}</div>
+              </label>
+              <label class="tc-label">
+                <span>Student</span>
+                <select class="tc-select" id="tc-student-select" ${state.students.length && activeModule ? '' : 'disabled'}>${studentsOptions}</select>
+              </label>
             </div>
-          </div>
+
+            <div class="tc-actions">
+              <button class="tc-btn tc-btn-primary" type="button" id="tc-send-module" ${state.students.length && activeModule ? '' : 'disabled'}>Send cards</button>
+              <div class="tc-note">The student will see this module inside the Cards tab on the student dashboard.</div>
+            </div>
+          </section>
           `;
           }
 
@@ -1067,20 +1075,18 @@ tbody.addEventListener('click', async function (event) {
           : `<div class="tc-empty">Select or create a module first.</div>`;
 
           return `
-          <div class="tc-card">
-            <div class="tc-head">
-              <div class="tc-kicker">Assigned modules</div>
-              <h2 class="tc-title" style="font-size:24px;">Sent to students</h2>
-              <div class="tc-sub">Track classroom cards progress for the currently selected module.</div>
+          <section class="tc-section">
+            <div class="tc-section-head">
+              <div class="tc-section-kicker">Assigned modules</div>
+              <h3 class="tc-section-title">Sent to students</h3>
+              <div class="tc-section-sub">Track classroom cards progress for the currently selected module.</div>
             </div>
-            <div class="tc-body">
-              <div class="tc-assignment-list">${listHtml}</div>
-            </div>
-          </div>
+            <div class="tc-assignment-list">${listHtml}</div>
+          </section>
           `;
           }
 
-          function renderApp() {
+          function renderApp() { {
           const root = rootEl();
           if (!root) return;
 
@@ -1113,30 +1119,32 @@ tbody.addEventListener('click', async function (event) {
                 <h2 class="tc-group-title">Module workspace</h2>
                 <div class="tc-group-sub">Select a module, preview it in Learn mode, and edit it in Manage mode.</div>
               </div>
+              <div class="tc-group-body">
+                ${renderModulesPanel()}
 
-              ${renderModulesPanel()}
+                <section class="tc-section">
+                  <div class="tc-section-head">
+                    <div class="tc-section-kicker">Cards study area</div>
+                    <h3 class="tc-section-title">${escapeHtml(state.modules.find((m) => m.id === state.activeModuleId)?.title || 'Cards')}</h3>
+                    <div class="tc-section-sub">Use Learn mode to preview your module and Manage mode to edit the content before sending it.</div>
+                  </div>
 
-              <div class="tc-card">
-                <div class="tc-head">
-                  <div class="tc-kicker">Cards study area</div>
-                  <h2 class="tc-title" style="font-size:24px;">${escapeHtml(state.modules.find((m) => m.id === state.activeModuleId)?.title || 'Cards')}</h2>
-                  <div class="tc-sub">Use Learn mode to preview your module and Manage mode to edit the content before sending it.</div>
-                </div>
-                <div class="tc-body">
-                  <div class="tc-toolbar">
-                    <div class="tc-switch" role="tablist" aria-label="Cards mode">
-                      <button id="tc-mode-learn" type="button" class="${state.mode === 'learn' ? 'active' : ''}">Learn</button>
-                      <button id="tc-mode-manage" type="button" class="${state.mode === 'manage' ? 'active' : ''}">Manage</button>
+                  <div class="tc-study-shell">
+                    <div class="tc-toolbar">
+                      <div class="tc-switch" role="tablist" aria-label="Cards mode">
+                        <button id="tc-mode-learn" type="button" class="${state.mode === 'learn' ? 'active' : ''}">Learn</button>
+                        <button id="tc-mode-manage" type="button" class="${state.mode === 'manage' ? 'active' : ''}">Manage</button>
+                      </div>
+                      <button class="tc-btn tc-btn-secondary" type="button" id="tc-shuffle" ${state.mode==='learn' && state.cards.length ? '' : 'disabled' }>Shuffle</button>
+                      <div class="grow"></div>
+                      <input class="tc-input" id="tc-search" placeholder="Search cards…" value="${escapeHtml(state.term)}" ${state.activeModuleId ? '' : 'disabled' } />
                     </div>
-                    <button class="tc-btn tc-btn-secondary" type="button" id="tc-shuffle" ${state.mode==='learn' && state.cards.length ? '' : 'disabled' }>Shuffle</button>
-                    <div class="grow"></div>
-                    <input class="tc-input" id="tc-search" placeholder="Search cards…" value="${escapeHtml(state.term)}" ${state.activeModuleId ? '' : 'disabled' } />
+                    <div id="tc-content" style="margin-top:14px;"></div>
+                    <div class="tc-progress" style="margin-top:12px;">
+                      <div class="tc-bar" id="tc-bar"></div>
+                    </div>
                   </div>
-                  <div id="tc-content" style="margin-top:14px;"></div>
-                  <div class="tc-progress" style="margin-top:12px;">
-                    <div class="tc-bar" id="tc-bar"></div>
-                  </div>
-                </div>
+                </section>
               </div>
             </div>
 
@@ -1146,9 +1154,10 @@ tbody.addEventListener('click', async function (event) {
                 <h2 class="tc-group-title">Student delivery</h2>
                 <div class="tc-group-sub">Send the active module to a student and track the assigned module state below.</div>
               </div>
-
-              ${renderSendPanel()}
-              ${renderAssignmentsPanel()}
+              <div class="tc-group-body">
+                ${renderSendPanel()}
+                ${renderAssignmentsPanel()}
+              </div>
             </div>
           </div>
           `;
@@ -1244,4 +1253,4 @@ tbody.addEventListener('click', async function (event) {
           } else {
           window.addEventListener('evo:teacher-ready', startWhenReady, { once: true });
           }
-          })();
+          }})();
