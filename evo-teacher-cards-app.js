@@ -1086,7 +1086,7 @@ tbody.addEventListener('click', async function (event) {
           `;
           }
 
-          function renderApp() { {
+          function renderApp() { 
           const root = rootEl();
           if (!root) return;
 
@@ -1253,4 +1253,4 @@ tbody.addEventListener('click', async function (event) {
           } else {
           window.addEventListener('evo:teacher-ready', startWhenReady, { once: true });
           }
-          }})();
+          })();
