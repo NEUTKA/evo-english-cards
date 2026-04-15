@@ -24,6 +24,129 @@ flash: null,
 mode: 'learn'
 };
 
+let tcRealtimeChannel = null;
+let tcRealtimeTimer = null;
+let tcRealtimeBusy = false;
+
+function clearTeacherCardsRealtime() {
+  if (tcRealtimeTimer) {
+    window.clearTimeout(tcRealtimeTimer);
+    tcRealtimeTimer = null;
+  }
+
+  if (tcRealtimeChannel && window.supabase?.removeChannel) {
+    window.supabase.removeChannel(tcRealtimeChannel);
+  }
+
+  tcRealtimeChannel = null;
+}
+
+function getRealtimeRow(payload) {
+  if (payload?.new && Object.keys(payload.new).length) return payload.new;
+  if (payload?.old && Object.keys(payload.old).length) return payload.old;
+  return null;
+}
+
+function teacherHasModule(moduleId) {
+  return !!moduleId && state.modules.some((m) => m.id === moduleId);
+}
+
+function teacherHasAssignment(assignmentId) {
+  if (!assignmentId) return false;
+  for (const rows of state.assignmentsByModule.values()) {
+    if ((rows || []).some((row) => row.id === assignmentId)) return true;
+  }
+  return false;
+}
+
+function scheduleTeacherCardsRealtimeRefresh(reason) {
+  if (tcRealtimeTimer) window.clearTimeout(tcRealtimeTimer);
+
+  tcRealtimeTimer = window.setTimeout(async () => {
+    if (tcRealtimeBusy) return;
+    tcRealtimeBusy = true;
+
+    try {
+      await reloadAll();
+      renderApp();
+    } catch (err) {
+      console.error('[teacher-cards] realtime refresh error:', reason, err);
+    } finally {
+      tcRealtimeBusy = false;
+    }
+  }, 220);
+}
+
+function initTeacherCardsRealtime() {
+  const supabase = window.supabase;
+  if (!supabase || !state.userId) return;
+
+  clearTeacherCardsRealtime();
+
+  tcRealtimeChannel = supabase
+    .channel(`teacher-cards-${state.userId}`)
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_modules',
+        filter: `teacher_id=eq.${state.userId}`
+      },
+      () => {
+        scheduleTeacherCardsRealtimeRefresh('classroom_vocab_modules');
+      }
+    )
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_assignments',
+        filter: `teacher_id=eq.${state.userId}`
+      },
+      () => {
+        scheduleTeacherCardsRealtimeRefresh('classroom_vocab_assignments');
+      }
+    )
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_cards'
+      },
+      (payload) => {
+        const row = getRealtimeRow(payload);
+        if (row?.module_id && teacherHasModule(row.module_id)) {
+          scheduleTeacherCardsRealtimeRefresh('classroom_vocab_cards');
+        }
+      }
+    )
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_card_progress'
+      },
+      (payload) => {
+        const row = getRealtimeRow(payload);
+        if (row?.assignment_id && teacherHasAssignment(row.assignment_id)) {
+          scheduleTeacherCardsRealtimeRefresh('classroom_vocab_card_progress');
+        }
+      }
+    )
+
+    .subscribe((status) => {
+      console.log('[teacher-cards] realtime status:', status);
+    });
+}
+
 function rootEl() {
 return document.getElementById(ROOT_ID);
 }
@@ -1227,17 +1350,19 @@ tbody.addEventListener('click', async function (event) {
           }
           }
 
-          async function startApp() {
-          injectStyles();
-          setLoading();
-          try {
-          await reloadAll();
-          renderApp();
-          } catch (err) {
-          console.error('[teacher-cards] load error:', err);
-          setError(err?.message || 'Failed to load teacher cards app.');
-          }
-          }
+async function startApp() {
+  injectStyles();
+  setLoading();
+
+  try {
+    await reloadAll();
+    renderApp();
+    initTeacherCardsRealtime();
+  } catch (err) {
+    console.error('[teacher-cards] load error:', err);
+    setError(err?.message || 'Failed to load teacher cards app.');
+  }
+}
 
           function startWhenReady() {
           const ready = () => !!rootEl() && !!window.supabase;
@@ -1247,6 +1372,8 @@ tbody.addEventListener('click', async function (event) {
           }
           when(ready, startApp);
           }
+
+window.addEventListener('beforeunload', clearTeacherCardsRealtime);
 
           if (window.__evoAllowTeacherApp) {
           startWhenReady();

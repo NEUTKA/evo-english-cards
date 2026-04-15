@@ -26,6 +26,125 @@
     mode: 'learn'
   };
 
+  let scRealtimeChannel = null;
+let scRealtimeTimer = null;
+let scRealtimeBusy = false;
+
+function clearStudentCardsRealtime() {
+  if (scRealtimeTimer) {
+    window.clearTimeout(scRealtimeTimer);
+    scRealtimeTimer = null;
+  }
+
+  if (scRealtimeChannel && window.supabase?.removeChannel) {
+    window.supabase.removeChannel(scRealtimeChannel);
+  }
+
+  scRealtimeChannel = null;
+}
+
+function getRealtimeRow(payload) {
+  if (payload?.new && Object.keys(payload.new).length) return payload.new;
+  if (payload?.old && Object.keys(payload.old).length) return payload.old;
+  return null;
+}
+
+function studentHasModule(moduleId) {
+  return !!moduleId && state.assignments.some((a) => a.module_id === moduleId);
+}
+
+function studentHasAssignment(assignmentId) {
+  return !!assignmentId && state.assignments.some((a) => a.id === assignmentId);
+}
+
+function scheduleStudentCardsRealtimeRefresh(reason) {
+  if (scRealtimeTimer) window.clearTimeout(scRealtimeTimer);
+
+  scRealtimeTimer = window.setTimeout(async () => {
+    if (scRealtimeBusy) return;
+    scRealtimeBusy = true;
+
+    try {
+      await reloadAll();
+      renderApp();
+    } catch (err) {
+      console.error('[student-cards] realtime refresh error:', reason, err);
+    } finally {
+      scRealtimeBusy = false;
+    }
+  }, 220);
+}
+
+function initStudentCardsRealtime() {
+  const supabase = window.supabase;
+  if (!supabase || !state.userId) return;
+
+  clearStudentCardsRealtime();
+
+  scRealtimeChannel = supabase
+    .channel(`student-cards-${state.userId}`)
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_assignments',
+        filter: `student_id=eq.${state.userId}`
+      },
+      () => {
+        scheduleStudentCardsRealtimeRefresh('classroom_vocab_assignments');
+      }
+    )
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_card_progress',
+        filter: `student_id=eq.${state.userId}`
+      },
+      () => {
+        scheduleStudentCardsRealtimeRefresh('classroom_vocab_card_progress');
+      }
+    )
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_cards'
+      },
+      (payload) => {
+        const row = getRealtimeRow(payload);
+        if (row?.module_id && studentHasModule(row.module_id)) {
+          scheduleStudentCardsRealtimeRefresh('classroom_vocab_cards');
+        }
+      }
+    )
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'classroom_vocab_modules'
+      },
+      (payload) => {
+        const row = getRealtimeRow(payload);
+        if (row?.id && studentHasModule(row.id)) {
+          scheduleStudentCardsRealtimeRefresh('classroom_vocab_modules');
+        }
+      }
+    )
+
+    .subscribe((status) => {
+      console.log('[student-cards] realtime status:', status);
+    });
+}
+
   function rootEl() {
     return document.getElementById(ROOT_ID);
   }
@@ -1057,21 +1176,22 @@ for (let i = state.filtered.length - 1; i > 0; i--) {
     }
   }
 
-  async function startApp() {
-    if (state.started) return;
-    state.started = true;
+async function startApp() {
+  if (state.started) return;
+  state.started = true;
 
-    injectStyles();
-    setLoading();
+  injectStyles();
+  setLoading();
 
-    try {
-      await reloadAll();
-      renderApp();
-    } catch (err) {
-      console.error('[student-cards] load error:', err);
-      setError(err?.message || 'Failed to load student cards app.');
-    }
+  try {
+    await reloadAll();
+    renderApp();
+    initStudentCardsRealtime();
+  } catch (err) {
+    console.error('[student-cards] load error:', err);
+    setError(err?.message || 'Failed to load student cards app.');
   }
+}
 
   function startWhenReady() {
     const ready = () => !!rootEl() && !!window.supabase;
@@ -1081,6 +1201,8 @@ for (let i = state.filtered.length - 1; i > 0; i--) {
     }
     when(ready, startApp);
   }
+
+window.addEventListener('beforeunload', clearStudentCardsRealtime);
 
   if (window.__evoAllowStudentApp) {
     startWhenReady();
