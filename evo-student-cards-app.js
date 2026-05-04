@@ -24,7 +24,8 @@
     hasCelebrated: false,
     flash: null,
     mode: 'learn',
-    actionBusy: false
+    actionBusy: false,
+    suppressRealtimeUntil: 0
   };
 
   let scRealtimeChannel = null;
@@ -62,6 +63,10 @@ function scheduleStudentCardsRealtimeRefresh(reason) {
   if (scRealtimeTimer) window.clearTimeout(scRealtimeTimer);
 
   scRealtimeTimer = window.setTimeout(async () => {
+    if (Date.now() < state.suppressRealtimeUntil && (reason === 'classroom_vocab_card_progress' || reason === 'classroom_vocab_assignments')) {
+      return;
+    }
+
     if (scRealtimeBusy) return;
     scRealtimeBusy = true;
 
@@ -98,6 +103,7 @@ function scheduleStudentCardsRealtimeRefresh(reason) {
         if (restoredQueue.length) state.queue = restoredQueue;
         if (restoredBaseIds.length) state.baseIds = restoredBaseIds;
         state.known = new Set(restoredKnown);
+        saveSessionKnown();
         state.idx = Math.min(previousSession.idx, Math.max(0, state.queue.length - 1));
         state.flipped = previousSession.flipped;
         state.hasCelebrated = previousSession.hasCelebrated;
@@ -596,6 +602,59 @@ function initStudentCardsRealtime() {
     return state.assignments.find((a) => a.id === state.activeAssignmentId) || null;
   }
 
+
+const SESSION_STORAGE_PREFIX = 'evo-student-cards-session-v2:';
+
+function getSessionStorageKey(assignmentId) {
+  return assignmentId ? `${SESSION_STORAGE_PREFIX}${assignmentId}` : null;
+}
+
+function getKnownCountForBaseIds() {
+  if (!state.baseIds.length || !(state.known instanceof Set)) return 0;
+  return state.baseIds.reduce((count, id) => count + (state.known.has(id) ? 1 : 0), 0);
+}
+
+function loadSessionKnownForAssignment(assignmentId, allowedIds) {
+  const key = getSessionStorageKey(assignmentId);
+  const allowed = new Set(allowedIds || []);
+  if (!key || !window.sessionStorage) return new Set();
+
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(key) || '[]');
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id) => allowed.has(id)));
+  } catch (err) {
+    console.warn('[student-cards] failed to load session progress:', err);
+    return new Set();
+  }
+}
+
+function saveSessionKnown() {
+  const assignment = getActiveAssignment();
+  const key = getSessionStorageKey(assignment?.id);
+  if (!key || !window.sessionStorage || !(state.known instanceof Set)) return;
+
+  const allowed = new Set(state.baseIds || []);
+  const values = [...state.known].filter((id) => allowed.has(id));
+
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(values));
+  } catch (err) {
+    console.warn('[student-cards] failed to save session progress:', err);
+  }
+}
+
+function clearSessionKnown(assignmentId) {
+  const key = getSessionStorageKey(assignmentId || state.activeAssignmentId);
+  if (!key || !window.sessionStorage) return;
+
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch (err) {
+    console.warn('[student-cards] failed to clear session progress:', err);
+  }
+}
+
 function syncKnownFromProgress() {
   // В student cards saved progress и session progress должны быть раздельны.
   // progressByCardId = что уже сохранено в БД
@@ -633,12 +692,12 @@ function syncKnownFromProgress() {
 
 function progressPct() {
   return state.baseIds.length
-    ? (state.known.size / state.baseIds.length) * 100
+    ? (getKnownCountForBaseIds() / state.baseIds.length) * 100
     : 0;
 }
 
 function isSessionComplete() {
-  return state.baseIds.length > 0 && state.known.size >= state.baseIds.length;
+  return state.baseIds.length > 0 && getKnownCountForBaseIds() >= state.baseIds.length;
 }
 
 function clearStudentCardsKeydown() {
@@ -648,7 +707,10 @@ function clearStudentCardsKeydown() {
   }
 }
 
-function resetPracticeSession() {
+function resetPracticeSession(options = {}) {
+  const shouldClearSavedSession = options.clearSavedSession !== false;
+  if (shouldClearSavedSession) clearSessionKnown();
+
   state.known = new Set();
   state.idx = 0;
   state.flipped = false;
@@ -659,7 +721,7 @@ function resetPracticeSession() {
 function restartPracticeFromBeginning() {
   state.queue = state.filtered.slice();
   state.baseIds = [...new Set(state.queue.map((card) => card.id))];
-  resetPracticeSession();
+  resetPracticeSession({ clearSavedSession: true });
 }
 
 function moveToNextCard() {
@@ -697,6 +759,8 @@ function applyProgressLocally(cardId, patch) {
 }
 
 function saveCardProgressInBackground(cardId, patch) {
+  state.suppressRealtimeUntil = Date.now() + 1800;
+
   saveCardProgress(cardId, patch).catch((err) => {
     console.error('[student-cards] background progress save error:', err);
     showMiniStatus('Progress was updated on screen, but it was not synced. Please check your connection.', 'error');
@@ -876,15 +940,14 @@ async function fetchCardsAndProgress() {
   state.cards = cardsRows || [];
   state.progressByCardId = new Map((progressRows || []).map((p) => [p.card_id, p]));
 
-  // ВАЖНО:
-  // начинаем новую session queue с нуля,
-  // но сохранённый progress остаётся в progressByCardId и в статусе assignment
-  state.known = new Set();
+  const allowedIds = state.cards.map((card) => card.id);
+  state.known = loadSessionKnownForAssignment(assignment.id, allowedIds);
   state.idx = 0;
   state.flipped = false;
   state.hasCelebrated = false;
 
   rebuildQueue(true);
+  saveSessionKnown();
   syncActiveAssignmentLocalProgress();
 }
 
@@ -1009,7 +1072,7 @@ function renderLearn() {
         <button class="sc-btn sc-btn-secondary" type="button" id="sc-prev">←</button>
         <button class="sc-btn sc-btn-secondary" type="button" id="sc-flip">Flip</button>
         <button class="sc-btn sc-btn-secondary" type="button" id="sc-next">→</button>
-        <span class="sc-note" style="margin-left:12px;">${Math.min(state.known.size + 1, state.baseIds.length)} / ${state.baseIds.length}</span>
+        <span class="sc-note" style="margin-left:12px;">${Math.min(getKnownCountForBaseIds() + 1, state.baseIds.length)} / ${state.baseIds.length}</span>
       </div>
 
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1068,6 +1131,7 @@ function renderLearn() {
     // Supabase sync happens in the background, so the button no longer feels unstable.
     applyProgressLocally(cardId, { is_known: true, touch: true });
     state.known.add(cardId);
+    saveSessionKnown();
     moveToNextCard();
 
     state.actionBusy = false;
