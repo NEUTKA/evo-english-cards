@@ -58,6 +58,12 @@
       .evc-table tr:last-child td{border-bottom:none}
       .evc-table input{width:100%;padding:8px 10px;border:1px solid #d0d5dd;border-radius:8px;font:14px system-ui}
       .evc-flash-inline{margin-top:12px}
+      .evc-complete{padding:28px;border:1px solid #b7ebc6;border-radius:16px;background:#ecfdf3;color:#027a48;text-align:center;display:grid;gap:10px;justify-items:center}
+      .evc-complete-title{font-size:24px;font-weight:800;color:#027a48}
+      .evc-complete-text{font-size:15px;color:#065f46;line-height:1.5;max-width:520px}
+      .evc-confetti{position:fixed;inset:0;pointer-events:none;z-index:10000;overflow:hidden}
+      .evc-piece{position:absolute;width:8px;height:14px;opacity:.9;animation:evc-fall 1200ms ease-out forwards}
+      @keyframes evc-fall{0%{transform:translate3d(var(--x,0),-20px,0) rotate(0deg)}100%{transform:translate3d(var(--x-end,0),calc(100vh + 30px),0) rotate(720deg)}}
       @media (max-width:760px){[data-evo-my-vocab]{padding:0 12px 28px}.evc-head,.evc-body{padding:16px}.evc-title{font-size:24px}.evc-toolbar{align-items:stretch}.evc-toolbar .grow{display:none}.evc-select,.evc-toolbar .evc-input,.evc-toolbar .evc-btn{width:100%}.evc-under{flex-direction:column;align-items:stretch}.evc-actions .evc-btn{flex:1}}
     `;
     document.head.appendChild(style);
@@ -104,6 +110,7 @@
       idx: 0,
       flipped: false,
       flash: null,
+      hasCelebrated: false,
       bridgeProvider: null
     };
 
@@ -212,8 +219,75 @@
         state.known = new Set();
         state.idx = 0;
         state.flipped = false;
+        state.hasCelebrated = false;
       }
       if (state.idx >= state.queue.length) state.idx = Math.max(0, state.queue.length - 1);
+    }
+
+    function shuffleQueue() {
+      rebuildQueue(true);
+      for (let i = state.queue.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [state.queue[i], state.queue[j]] = [state.queue[j], state.queue[i]];
+      }
+      state.idx = 0;
+      state.flipped = false;
+      state.hasCelebrated = false;
+    }
+
+    function celebrate() {
+      if (state.hasCelebrated) return;
+      state.hasCelebrated = true;
+
+      const toast = document.createElement('div');
+      toast.textContent = 'Great! All cards are learned 🎉';
+      toast.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);background:#111;color:#fff;padding:12px 16px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:10001;opacity:0;transition:.25s opacity;font-family:system-ui;font-size:16px;text-align:center';
+      document.body.appendChild(toast);
+      requestAnimationFrame(() => { toast.style.opacity = '1'; });
+      window.setTimeout(() => {
+        toast.style.opacity = '0';
+        window.setTimeout(() => toast.remove(), 300);
+      }, 1600);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'evc-confetti';
+      document.body.appendChild(wrap);
+      const colors = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#fb7185'];
+      for (let i = 0; i < 90; i += 1) {
+        const piece = document.createElement('div');
+        piece.className = 'evc-piece';
+        piece.style.left = Math.random() * 100 + 'vw';
+        piece.style.background = colors[i % colors.length];
+        piece.style.setProperty('--x', `${(Math.random() - 0.5) * 120}px`);
+        piece.style.setProperty('--x-end', `${(Math.random() - 0.5) * 220}px`);
+        piece.style.animationDelay = `${Math.random() * 250}ms`;
+        wrap.appendChild(piece);
+      }
+      window.setTimeout(() => wrap.remove(), 1800);
+    }
+
+    function renderContentOnly() {
+      const content = root.querySelector('[data-evc-content]');
+      if (!content) return render();
+      content.innerHTML = state.mode === 'learn' ? renderLearnArea() : renderManageArea();
+      bindEvents();
+    }
+
+    function markKnownAndAdvance() {
+      const c = state.queue[state.idx];
+      if (c) state.known.add(c.id);
+      state.flipped = false;
+
+      if (state.baseIds.length && state.known.size >= state.baseIds.length) {
+        celebrate();
+        return renderContentOnly();
+      }
+
+      if (state.idx < state.queue.length - 1) {
+        state.idx += 1;
+      }
+
+      renderContentOnly();
     }
 
     async function saveWordToActiveModule(payload) {
@@ -360,6 +434,16 @@
     function renderLearnArea() {
       const c = state.queue[state.idx];
       const pct = state.baseIds.length ? Math.round((state.known.size / state.baseIds.length) * 100) : 0;
+      if (state.baseIds.length && state.known.size >= state.baseIds.length) {
+        return `
+          <div class="evc-complete">
+            <div class="evc-complete-title">Great! All cards are learned 🎉</div>
+            <div class="evc-complete-text">You marked every card in this module as known. You can shuffle and practice again, switch to Manage, or add more cards.</div>
+            <button class="evc-btn evc-btn-primary" type="button" data-evc-action="restart">Practice again</button>
+          </div>
+          <div class="evc-progress"><div class="evc-bar" style="width:100%"></div></div>
+        `;
+      }
       if (!c) {
         return `<div class="evc-empty">No cards match the current filter.</div><div class="evc-progress"><div class="evc-bar" style="width:0%"></div></div>`;
       }
@@ -435,7 +519,6 @@
             <div class="evc-head">
               <div class="evc-kicker">Vocabulary</div>
               <h2 class="evc-title">${escapeHtml(title)}</h2>
-              <div class="evc-sub">Personal modules for the currently logged-in account. Selected words from the global translator are saved here.</div>
               <div class="evc-meta">
                 <div class="evc-pill">Role: ${escapeHtml(role)}</div>
                 <div class="evc-pill">${state.modules.length} module${state.modules.length === 1 ? '' : 's'}</div>
@@ -486,7 +569,7 @@
         search.oninput = (e) => {
           state.search = e.target.value || '';
           rebuildQueue(true);
-          render();
+          renderContentOnly();
         };
       }
 
@@ -506,12 +589,13 @@
             if (action === 'delete-module') return deleteModule();
             if (action === 'add-card') return createCardFromForm();
             if (action === 'filter-starred') { state.filterStarred = !state.filterStarred; rebuildQueue(true); return render(); }
-            if (action === 'shuffle') { state.queue.sort(() => Math.random() - 0.5); state.known = new Set(); state.idx = 0; state.flipped = false; return render(); }
-            if (action === 'flip') { state.flipped = !state.flipped; return render(); }
-            if (action === 'prev') { state.idx = Math.max(0, state.idx - 1); state.flipped = false; return render(); }
-            if (action === 'next') { state.idx = Math.min(state.queue.length - 1, state.idx + 1); state.flipped = false; return render(); }
-            if (action === 'know') { const c = state.queue[state.idx]; if (c) state.known.add(c.id); state.idx = Math.min(state.queue.length - 1, state.idx + 1); state.flipped = false; return render(); }
-            if (action === 'dont-know') { const c = state.queue[state.idx]; if (c) state.queue.push(c); state.idx = Math.min(state.queue.length - 1, state.idx + 1); state.flipped = false; return render(); }
+            if (action === 'shuffle') { shuffleQueue(); return renderContentOnly(); }
+            if (action === 'restart') { rebuildQueue(true); return renderContentOnly(); }
+            if (action === 'flip') { state.flipped = !state.flipped; return renderContentOnly(); }
+            if (action === 'prev') { state.idx = Math.max(0, state.idx - 1); state.flipped = false; return renderContentOnly(); }
+            if (action === 'next') { state.idx = Math.min(state.queue.length - 1, state.idx + 1); state.flipped = false; return renderContentOnly(); }
+            if (action === 'know') { return markKnownAndAdvance(); }
+            if (action === 'dont-know') { const c = state.queue[state.idx]; if (c) state.queue.push(c); if (state.idx < state.queue.length - 1) state.idx += 1; state.flipped = false; return renderContentOnly(); }
             if (action === 'star') return toggleStar(el.getAttribute('data-card-id'));
             if (action === 'save-row') return updateCard(el.closest('tr'));
             if (action === 'delete-row') return deleteCard(el.closest('tr')?.getAttribute('data-card-id'));
