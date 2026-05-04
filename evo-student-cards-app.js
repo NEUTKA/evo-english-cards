@@ -64,15 +64,51 @@ function scheduleStudentCardsRealtimeRefresh(reason) {
     if (scRealtimeBusy) return;
     scRealtimeBusy = true;
 
+    const previousSession = {
+      assignmentId: state.activeAssignmentId,
+      mode: state.mode,
+      term: state.term,
+      filterStarred: state.filterStarred,
+      known: new Set(state.known || []),
+      baseIds: Array.isArray(state.baseIds) ? state.baseIds.slice() : [],
+      queueIds: Array.isArray(state.queue) ? state.queue.map((card) => card?.id).filter(Boolean) : [],
+      idx: state.idx,
+      flipped: state.flipped,
+      hasCelebrated: state.hasCelebrated
+    };
+
     try {
       await reloadAll();
+
+      // Realtime updates from Supabase are useful for fresh DB data,
+      // but they must not restart the student's current practice session.
+      // Without this guard, the completion card can disappear right after the last answer.
+      if (previousSession.assignmentId && previousSession.assignmentId === state.activeAssignmentId) {
+        state.term = previousSession.term;
+        state.filterStarred = previousSession.filterStarred;
+
+        const cardsById = new Map((state.cards || []).map((card) => [card.id, card]));
+        const restoredQueue = previousSession.queueIds
+          .map((id) => cardsById.get(id))
+          .filter(Boolean);
+        const restoredBaseIds = previousSession.baseIds.filter((id) => cardsById.has(id));
+        const restoredKnown = [...previousSession.known].filter((id) => cardsById.has(id));
+
+        if (restoredQueue.length) state.queue = restoredQueue;
+        if (restoredBaseIds.length) state.baseIds = restoredBaseIds;
+        state.known = new Set(restoredKnown);
+        state.idx = Math.min(previousSession.idx, Math.max(0, state.queue.length - 1));
+        state.flipped = previousSession.flipped;
+        state.hasCelebrated = previousSession.hasCelebrated;
+      }
+
       renderApp();
     } catch (err) {
       console.error('[student-cards] realtime refresh error:', reason, err);
     } finally {
       scRealtimeBusy = false;
     }
-  }, 220);
+  }, 450);
 }
 
 function initStudentCardsRealtime() {
@@ -498,26 +534,6 @@ function initStudentCardsRealtime() {
       .sc-complete-sub{max-width:620px;margin:10px auto 0;color:#475467;font-size:15px;line-height:1.6}
       .sc-complete-stats{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:18px 0 0}
       .sc-complete-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:20px}
-      .sc-toast{
-        position:fixed;
-        left:50%;
-        top:18%;
-        transform:translateX(-50%) translateY(-8px);
-        width:min(460px,calc(100vw - 32px));
-        background:#111213;
-        color:#fff;
-        padding:14px 16px;
-        border-radius:16px;
-        box-shadow:0 20px 50px rgba(0,0,0,.28);
-        z-index:10001;
-        opacity:0;
-        transition:.25s opacity,.25s transform;
-        font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-        font-size:15px;
-        line-height:1.45;
-        text-align:center;
-      }
-      .sc-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
       @keyframes sc-fall{
         0%{transform:translate3d(var(--x,0),-20px,0) rotate(0deg)}
         100%{transform:translate3d(var(--x-end,0),calc(100vh + 30px),0) rotate(720deg)}
@@ -549,18 +565,9 @@ function initStudentCardsRealtime() {
   }
 
   function celebrate() {
-    const existingToast = document.querySelector('.sc-toast');
-    if (existingToast) existingToast.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'sc-toast';
-    toast.innerHTML = '<strong>Great work!</strong><br>You finished all cards in this module.';
-    document.body.appendChild(toast);
-    requestAnimationFrame(() => toast.classList.add('show'));
-    setTimeout(() => {
-      toast.classList.remove('show');
-      setTimeout(() => toast.remove(), 300);
-    }, 2200);
+    // The completion message is rendered inside the card area.
+    // Keep celebrate() only for the visual confetti effect to avoid duplicate congratulations.
+    document.querySelectorAll('.sc-toast').forEach((toast) => toast.remove());
 
     const wrap = document.createElement('div');
     wrap.className = 'sc-confetti';
