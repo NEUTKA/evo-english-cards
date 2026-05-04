@@ -23,7 +23,8 @@
     filterStarred: false,
     hasCelebrated: false,
     flash: null,
-    mode: 'learn'
+    mode: 'learn',
+    actionBusy: false
   };
 
   let scRealtimeChannel = null;
@@ -652,6 +653,54 @@ function resetPracticeSession() {
   state.idx = 0;
   state.flipped = false;
   state.hasCelebrated = false;
+  state.actionBusy = false;
+}
+
+function restartPracticeFromBeginning() {
+  state.queue = state.filtered.slice();
+  state.baseIds = [...new Set(state.queue.map((card) => card.id))];
+  resetPracticeSession();
+}
+
+function moveToNextCard() {
+  state.idx += 1;
+  state.flipped = false;
+
+  if (state.idx >= state.queue.length && !isSessionComplete()) {
+    const nextUnknown = state.queue.findIndex((card) => !state.known.has(card.id));
+    state.idx = nextUnknown >= 0 ? nextUnknown : Math.max(0, state.queue.length - 1);
+  }
+}
+
+function applyProgressLocally(cardId, patch) {
+  const assignment = getActiveAssignment();
+  const existing = state.progressByCardId.get(cardId) || null;
+  const now = new Date().toISOString();
+
+  state.progressByCardId.set(cardId, {
+    id: existing?.id || `local-${cardId}`,
+    assignment_id: existing?.assignment_id || assignment?.id || null,
+    card_id: cardId,
+    student_id: existing?.student_id || state.userId,
+    is_known: Object.prototype.hasOwnProperty.call(patch, 'is_known')
+      ? !!patch.is_known
+      : !!existing?.is_known,
+    starred: Object.prototype.hasOwnProperty.call(patch, 'starred')
+      ? !!patch.starred
+      : !!existing?.starred,
+    last_reviewed_at: patch.touch ? now : (existing?.last_reviewed_at || null),
+    created_at: existing?.created_at || now,
+    updated_at: now
+  });
+
+  syncActiveAssignmentLocalProgress();
+}
+
+function saveCardProgressInBackground(cardId, patch) {
+  saveCardProgress(cardId, patch).catch((err) => {
+    console.error('[student-cards] background progress save error:', err);
+    showMiniStatus('Progress was updated on screen, but it was not synced. Please check your connection.', 'error');
+  });
 }
 
 function shuffleFilteredCards() {
@@ -906,30 +955,12 @@ function renderCompletion(content, bar) {
       </div>
       <div class="sc-complete-actions">
         <button class="sc-btn sc-btn-primary" type="button" id="sc-practice-again">Practice again</button>
-        <button class="sc-btn sc-btn-secondary" type="button" id="sc-review-list">Review list</button>
-        <button class="sc-btn sc-btn-secondary" type="button" id="sc-complete-shuffle">Shuffle again</button>
       </div>
     </div>
   `;
 
-  content.querySelector('#sc-practice-again').onclick = async (event) => {
-    const original = startButtonFeedback(event.currentTarget, 'Restarting...');
-    await finishButtonFeedback(event.currentTarget, original, true, 'Ready', 300);
-    resetPracticeSession();
-    renderLearn();
-  };
-
-  content.querySelector('#sc-review-list').onclick = async (event) => {
-    const original = startButtonFeedback(event.currentTarget, 'Opening...');
-    await finishButtonFeedback(event.currentTarget, original, true, 'Opened', 300);
-    state.mode = 'list';
-    renderApp();
-  };
-
-  content.querySelector('#sc-complete-shuffle').onclick = async (event) => {
-    const original = startButtonFeedback(event.currentTarget, 'Shuffling...');
-    shuffleFilteredCards();
-    await finishButtonFeedback(event.currentTarget, original, true, 'Shuffled', 300);
+  content.querySelector('#sc-practice-again').onclick = () => {
+    restartPracticeFromBeginning();
     renderLearn();
   };
 }
@@ -1027,44 +1058,34 @@ function renderLearn() {
     }
   };
 
-  content.querySelector('#sc-good').onclick = async (event) => {
-    const btn = event.currentTarget;
-    const original = startButtonFeedback(btn, 'Saving...');
-    try {
-      await saveCardProgress(c.id, { is_known: true, touch: true });
+  content.querySelector('#sc-good').onclick = () => {
+    if (state.actionBusy) return;
+    state.actionBusy = true;
 
-      // session progress
-      state.known.add(c.id);
-      state.idx += 1;
-      state.flipped = false;
+    const cardId = c.id;
 
-      await finishButtonFeedback(btn, original, true, 'Saved', 420);
-      renderApp();
-    } catch (err) {
-      console.error('[student-cards] save good error:', err);
-      await finishButtonFeedback(btn, original, false, 'Failed', 650);
-      showFlash('error', err?.message || 'Failed to save cards progress.');
-    }
+    // Fast optimistic UI: the student moves to the next card immediately.
+    // Supabase sync happens in the background, so the button no longer feels unstable.
+    applyProgressLocally(cardId, { is_known: true, touch: true });
+    state.known.add(cardId);
+    moveToNextCard();
+
+    state.actionBusy = false;
+    renderLearn();
+
+    saveCardProgressInBackground(cardId, { is_known: true, touch: true });
   };
 
-  content.querySelector('#sc-bad').onclick = async (event) => {
-    const btn = event.currentTarget;
-    const original = startButtonFeedback(btn, 'Saving...');
-    try {
-      await saveCardProgress(c.id, { is_known: false, touch: true });
+  content.querySelector('#sc-bad').onclick = () => {
+    if (state.actionBusy) return;
+    state.actionBusy = true;
 
-      // отправляем карту в конец очереди
-      state.queue.push(c);
-      state.idx += 1;
-      state.flipped = false;
+    // “Don't know” is only a practice navigation action.
+    // It does not save anything and does not show a misleading “Saved” status.
+    moveToNextCard();
 
-      await finishButtonFeedback(btn, original, true, 'Saved', 420);
-      renderApp();
-    } catch (err) {
-      console.error('[student-cards] save bad error:', err);
-      await finishButtonFeedback(btn, original, false, 'Failed', 650);
-      showFlash('error', err?.message || 'Failed to save cards progress.');
-    }
+    state.actionBusy = false;
+    renderLearn();
   };
 
   clearStudentCardsKeydown();
