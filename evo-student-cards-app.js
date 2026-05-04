@@ -195,6 +195,58 @@ function initStudentCardsRealtime() {
     return 'Not started';
   }
 
+  function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function rememberButton(button) {
+    return { text: button?.textContent || '' };
+  }
+
+  function paintButton(button, tone, text) {
+    if (!button) return;
+    button.classList.remove('is-busy', 'is-success', 'is-error');
+    if (tone) button.classList.add(`is-${tone}`);
+    if (text != null) button.textContent = text;
+  }
+
+  function startButtonFeedback(button, busyText) {
+    const original = rememberButton(button);
+    if (button) {
+      button.disabled = true;
+      paintButton(button, 'busy', busyText || original.text);
+    }
+    return original;
+  }
+
+  function finishButtonFeedback(button, original, ok, doneText, delay = 650) {
+    if (!button) return Promise.resolve();
+    paintButton(button, ok ? 'success' : 'error', doneText || (ok ? 'Done' : 'Failed'));
+    return wait(delay).then(() => {
+      button.disabled = false;
+      button.classList.remove('is-busy', 'is-success', 'is-error');
+      button.textContent = original?.text || button.textContent;
+    });
+  }
+
+  function showMiniStatus(message, type = 'success') {
+    const root = rootEl();
+    if (!root) return;
+    const old = root.querySelector('.sc-mini-status');
+    if (old) old.remove();
+    const el = document.createElement('div');
+    el.className = `sc-mini-status ${type === 'error' ? 'sc-error' : 'sc-success'}`;
+    el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:10020;max-width:min(360px,calc(100vw - 32px));box-shadow:0 12px 30px rgba(0,0,0,.18);';
+    el.textContent = message;
+    document.body.appendChild(el);
+    window.setTimeout(() => {
+      el.style.transition = 'opacity .25s ease, transform .25s ease';
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(8px)';
+      window.setTimeout(() => el.remove(), 280);
+    }, 1400);
+  }
+
   function showFlash(type, message) {
     state.flash = { type, message };
     renderApp();
@@ -255,6 +307,9 @@ function initStudentCardsRealtime() {
       .sc-btn-secondary{background:#f8fbff;color:#175cd3;border:1px solid #dbe7f3}
       .sc-btn-danger{background:#fff2f2;color:#b42318;border:1px solid #fecaca}
       .sc-btn[disabled]{opacity:.65;cursor:not-allowed}
+      .sc-btn.is-busy{opacity:.92;cursor:wait}
+      .sc-btn.is-success{background:#22c55e !important;border-color:#22c55e !important;color:#fff !important}
+      .sc-btn.is-error{background:#ef4444 !important;border-color:#ef4444 !important;color:#fff !important}
 
       .sc-note{color:#667085;font-size:14px}
       .sc-empty{padding:24px;border:1px dashed #cfd8e3;border-radius:14px;background:#fbfdff;color:#667085;text-align:center}
@@ -407,6 +462,62 @@ function initStudentCardsRealtime() {
 
       .sc-confetti{position:fixed;inset:0;pointer-events:none;z-index:10000;overflow:hidden}
       .sc-piece{position:absolute;width:8px;height:14px;opacity:.9;animation:sc-fall 1200ms ease-out forwards}
+      .sc-complete-card{
+        position:relative;
+        overflow:hidden;
+        border:1px solid #b7ebc6;
+        border-radius:18px;
+        padding:26px 22px;
+        background:radial-gradient(circle at 16% 10%,rgba(119,190,240,.26),transparent 32%),linear-gradient(180deg,#ffffff 0%,#ecfdf3 100%);
+        box-shadow:0 16px 34px rgba(17,18,19,.08);
+        text-align:center;
+      }
+      .sc-complete-card:before{
+        content:"";
+        position:absolute;
+        inset:auto -40px -64px auto;
+        width:180px;
+        height:180px;
+        border-radius:999px;
+        background:rgba(34,197,94,.12);
+      }
+      .sc-complete-emoji{
+        width:70px;
+        height:70px;
+        margin:0 auto 12px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-radius:999px;
+        background:#111213;
+        color:#fff;
+        font-size:34px;
+        box-shadow:0 12px 28px rgba(17,18,19,.18);
+      }
+      .sc-complete-title{margin:0;font-size:28px;line-height:1.15;color:#111213}
+      .sc-complete-sub{max-width:620px;margin:10px auto 0;color:#475467;font-size:15px;line-height:1.6}
+      .sc-complete-stats{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:18px 0 0}
+      .sc-complete-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:20px}
+      .sc-toast{
+        position:fixed;
+        left:50%;
+        top:18%;
+        transform:translateX(-50%) translateY(-8px);
+        width:min(460px,calc(100vw - 32px));
+        background:#111213;
+        color:#fff;
+        padding:14px 16px;
+        border-radius:16px;
+        box-shadow:0 20px 50px rgba(0,0,0,.28);
+        z-index:10001;
+        opacity:0;
+        transition:.25s opacity,.25s transform;
+        font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+        font-size:15px;
+        line-height:1.45;
+        text-align:center;
+      }
+      .sc-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
       @keyframes sc-fall{
         0%{transform:translate3d(var(--x,0),-20px,0) rotate(0deg)}
         100%{transform:translate3d(var(--x-end,0),calc(100vh + 30px),0) rotate(720deg)}
@@ -438,37 +549,39 @@ function initStudentCardsRealtime() {
   }
 
   function celebrate() {
+    const existingToast = document.querySelector('.sc-toast');
+    if (existingToast) existingToast.remove();
+
     const toast = document.createElement('div');
-    toast.textContent = 'Great! You finished this cards module 🎉';
-    toast.style.cssText = 'position:fixed;left:50%;top:18%;transform:translateX(-50%);background:#111;color:#fff;padding:12px 16px;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.25);z-index:10001;opacity:0;transition:.25s opacity;font-family:system-ui;font-size:16px';
+    toast.className = 'sc-toast';
+    toast.innerHTML = '<strong>Great work!</strong><br>You finished all cards in this module.';
     document.body.appendChild(toast);
-    requestAnimationFrame(() => {
-      toast.style.opacity = '1';
-    });
+    requestAnimationFrame(() => toast.classList.add('show'));
     setTimeout(() => {
-      toast.style.opacity = '0';
+      toast.classList.remove('show');
       setTimeout(() => toast.remove(), 300);
-    }, 1500);
+    }, 2200);
 
     const wrap = document.createElement('div');
     wrap.className = 'sc-confetti';
     document.body.appendChild(wrap);
-    const colors = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6'];
-    const pieces = 120;
+    const colors = ['#77BEF0', '#22c55e', '#fbbf24', '#60a5fa', '#a78bfa', '#f472b6'];
+    const pieces = 140;
     const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
     for (let i = 0; i < pieces; i++) {
       const d = document.createElement('div');
       d.className = 'sc-piece';
       d.style.background = colors[i % colors.length];
+      d.style.borderRadius = i % 3 === 0 ? '999px' : '2px';
       const x = Math.random() * vw;
-      const offset = (Math.random() * 2 - 1) * 80;
+      const offset = (Math.random() * 2 - 1) * 110;
       d.style.left = `${x}px`;
       d.style.setProperty('--x', '0px');
       d.style.setProperty('--x-end', `${offset}px`);
-      d.style.animationDelay = `${(Math.random() * 400) | 0}ms`;
+      d.style.animationDelay = `${(Math.random() * 420) | 0}ms`;
       wrap.appendChild(d);
     }
-    setTimeout(() => wrap.remove(), 1800);
+    setTimeout(() => wrap.remove(), 2100);
   }
 
   function getActiveAssignment() {
@@ -514,6 +627,36 @@ function progressPct() {
   return state.baseIds.length
     ? (state.known.size / state.baseIds.length) * 100
     : 0;
+}
+
+function isSessionComplete() {
+  return state.baseIds.length > 0 && state.known.size >= state.baseIds.length;
+}
+
+function clearStudentCardsKeydown() {
+  if (window.__studentCardsKeydown) {
+    document.removeEventListener('keydown', window.__studentCardsKeydown);
+    window.__studentCardsKeydown = null;
+  }
+}
+
+function resetPracticeSession() {
+  state.known = new Set();
+  state.idx = 0;
+  state.flipped = false;
+  state.hasCelebrated = false;
+}
+
+function shuffleFilteredCards() {
+  const source = state.filtered.slice();
+  for (let i = source.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [source[i], source[j]] = [source[j], source[i]];
+  }
+
+  state.baseIds = [...new Set(source.map((c) => c.id))];
+  state.queue = source;
+  resetPracticeSession();
 }
   function skipKnownForward() {
     while (state.idx < state.queue.length && state.known.has(state.queue[state.idx].id)) {
@@ -731,30 +874,79 @@ async function fetchCardsAndProgress() {
     syncActiveAssignmentLocalProgress();
   }
 
+function renderCompletion(content, bar) {
+  clearStudentCardsKeydown();
+  bar.style.width = '100%';
+
+  if (!state.hasCelebrated) {
+    celebrate();
+    state.hasCelebrated = true;
+  }
+
+  const moduleTitle = getActiveAssignment()?.module?.title || 'this module';
+  const total = state.baseIds.length;
+
+  content.innerHTML = `
+    <div class="sc-complete-card">
+      <div class="sc-complete-emoji">🎉</div>
+      <h3 class="sc-complete-title">Module completed!</h3>
+      <div class="sc-complete-sub">
+        Great work. You finished all ${escapeHtml(String(total))} card${total === 1 ? '' : 's'} in <strong>${escapeHtml(moduleTitle)}</strong> for this practice session.
+      </div>
+      <div class="sc-complete-stats">
+        <span class="sc-pill">Session progress: 100%</span>
+        <span class="sc-pill">Cards learned: ${escapeHtml(String(total))}</span>
+      </div>
+      <div class="sc-complete-actions">
+        <button class="sc-btn sc-btn-primary" type="button" id="sc-practice-again">Practice again</button>
+        <button class="sc-btn sc-btn-secondary" type="button" id="sc-review-list">Review list</button>
+        <button class="sc-btn sc-btn-secondary" type="button" id="sc-complete-shuffle">Shuffle again</button>
+      </div>
+    </div>
+  `;
+
+  content.querySelector('#sc-practice-again').onclick = async (event) => {
+    const original = startButtonFeedback(event.currentTarget, 'Restarting...');
+    await finishButtonFeedback(event.currentTarget, original, true, 'Ready', 300);
+    resetPracticeSession();
+    renderLearn();
+  };
+
+  content.querySelector('#sc-review-list').onclick = async (event) => {
+    const original = startButtonFeedback(event.currentTarget, 'Opening...');
+    await finishButtonFeedback(event.currentTarget, original, true, 'Opened', 300);
+    state.mode = 'list';
+    renderApp();
+  };
+
+  content.querySelector('#sc-complete-shuffle').onclick = async (event) => {
+    const original = startButtonFeedback(event.currentTarget, 'Shuffling...');
+    shuffleFilteredCards();
+    await finishButtonFeedback(event.currentTarget, original, true, 'Shuffled', 300);
+    renderLearn();
+  };
+}
+
 function renderLearn() {
   const content = rootEl()?.querySelector('#sc-content');
   const bar = rootEl()?.querySelector('#sc-bar');
   if (!content || !bar) return;
 
   if (!state.queue.length || !state.baseIds.length) {
+    clearStudentCardsKeydown();
     content.innerHTML = `<div class="sc-empty">No cards match the current filter.</div>`;
     bar.style.width = '0%';
     return;
   }
 
-  // НЕ вызываем skipKnownForward()
-  // Иначе prev/next и shuffle начинают ломаться
+  if (isSessionComplete()) {
+    renderCompletion(content, bar);
+    return;
+  }
 
   if (state.idx >= state.queue.length) {
-    if (state.known.size >= state.baseIds.length) {
-      if (!state.hasCelebrated) {
-        celebrate();
-        state.hasCelebrated = true;
-      }
-      state.idx = Math.max(0, state.queue.length - 1);
-    } else {
-      state.idx = Math.max(0, state.queue.length - 1);
-    }
+    const nextUnknown = state.queue.findIndex((card) => !state.known.has(card.id));
+    state.idx = nextUnknown >= 0 ? nextUnknown : Math.max(0, state.queue.length - 1);
   }
 
   if (state.idx < 0) state.idx = 0;
@@ -814,17 +1006,23 @@ function renderLearn() {
     renderLearn();
   };
 
-  content.querySelector('#sc-star').onclick = async () => {
+  content.querySelector('#sc-star').onclick = async (event) => {
+    const btn = event.currentTarget;
+    const original = startButtonFeedback(btn, starred ? 'Unstarring...' : 'Starring...');
     try {
       await saveCardProgress(c.id, { starred: !starred });
+      await finishButtonFeedback(btn, original, true, !starred ? 'Starred' : 'Unstarred', 420);
       renderApp();
     } catch (err) {
       console.error('[student-cards] star error:', err);
+      await finishButtonFeedback(btn, original, false, 'Failed', 650);
       showFlash('error', err?.message || 'Failed to update starred state.');
     }
   };
 
-  content.querySelector('#sc-good').onclick = async () => {
+  content.querySelector('#sc-good').onclick = async (event) => {
+    const btn = event.currentTarget;
+    const original = startButtonFeedback(btn, 'Saving...');
     try {
       await saveCardProgress(c.id, { is_known: true, touch: true });
 
@@ -833,14 +1031,18 @@ function renderLearn() {
       state.idx += 1;
       state.flipped = false;
 
+      await finishButtonFeedback(btn, original, true, 'Saved', 420);
       renderApp();
     } catch (err) {
       console.error('[student-cards] save good error:', err);
+      await finishButtonFeedback(btn, original, false, 'Failed', 650);
       showFlash('error', err?.message || 'Failed to save cards progress.');
     }
   };
 
-  content.querySelector('#sc-bad').onclick = async () => {
+  content.querySelector('#sc-bad').onclick = async (event) => {
+    const btn = event.currentTarget;
+    const original = startButtonFeedback(btn, 'Saving...');
     try {
       await saveCardProgress(c.id, { is_known: false, touch: true });
 
@@ -849,16 +1051,16 @@ function renderLearn() {
       state.idx += 1;
       state.flipped = false;
 
+      await finishButtonFeedback(btn, original, true, 'Saved', 420);
       renderApp();
     } catch (err) {
       console.error('[student-cards] save bad error:', err);
+      await finishButtonFeedback(btn, original, false, 'Failed', 650);
       showFlash('error', err?.message || 'Failed to save cards progress.');
     }
   };
 
-  if (window.__studentCardsKeydown) {
-    document.removeEventListener('keydown', window.__studentCardsKeydown);
-  }
+  clearStudentCardsKeydown();
 
   const keyHandler = (e) => {
     if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
@@ -945,8 +1147,10 @@ function renderLearn() {
     `;
 
     content.querySelectorAll('[data-action="toggle-known"]').forEach((btn) => {
-      btn.onclick = async () => {
-        const tr = btn.closest('tr');
+      btn.onclick = async (event) => {
+        const button = event.currentTarget;
+        const original = startButtonFeedback(button, 'Saving...');
+        const tr = button.closest('tr');
         const cardId = tr?.getAttribute('data-card-id');
         if (!cardId) return;
         const progress = state.progressByCardId.get(cardId);
@@ -955,17 +1159,21 @@ function renderLearn() {
             is_known: !(progress?.is_known),
             touch: true
           });
+          await finishButtonFeedback(button, original, true, 'Saved', 420);
           renderApp();
         } catch (err) {
           console.error('[student-cards] toggle known error:', err);
+          await finishButtonFeedback(button, original, false, 'Failed', 650);
           showFlash('error', err?.message || 'Failed to update known state.');
         }
       };
     });
 
     content.querySelectorAll('[data-action="toggle-star"]').forEach((btn) => {
-      btn.onclick = async () => {
-        const tr = btn.closest('tr');
+      btn.onclick = async (event) => {
+        const button = event.currentTarget;
+        const original = startButtonFeedback(button, 'Saving...');
+        const tr = button.closest('tr');
         const cardId = tr?.getAttribute('data-card-id');
         if (!cardId) return;
         const progress = state.progressByCardId.get(cardId);
@@ -973,9 +1181,11 @@ function renderLearn() {
           await saveCardProgress(cardId, {
             starred: !(progress?.starred)
           });
+          await finishButtonFeedback(button, original, true, 'Saved', 420);
           renderApp();
         } catch (err) {
           console.error('[student-cards] toggle star error:', err);
+          await finishButtonFeedback(button, original, false, 'Failed', 650);
           showFlash('error', err?.message || 'Failed to update starred state.');
         }
       };
@@ -1143,32 +1353,19 @@ function renderLearn() {
 
     const shuffleBtn = root.querySelector('#sc-shuffle');
     if (shuffleBtn) {
-      shuffleBtn.onclick = () => {
-for (let i = state.filtered.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      [state.filtered[i], state.filtered[j]] = [state.filtered[j], state.filtered[i]];
+      shuffleBtn.onclick = async () => {
+        const original = startButtonFeedback(shuffleBtn, 'Shuffling...');
+        shuffleFilteredCards();
+        await finishButtonFeedback(shuffleBtn, original, true, 'Shuffled', 420);
+        renderLearn();
+        showMiniStatus('Cards shuffled. Practice starts from the first card.');
+      };
     }
-
-    // ПОЛНЫЙ сброс текущей учебной сессии
-    state.baseIds = [...new Set(state.filtered.map((c) => c.id))];
-    state.queue = state.filtered.slice();
-    state.known = new Set();
-    state.idx = 0;
-    state.flipped = false;
-    state.hasCelebrated = false;
-
-    // визуально сразу обнуляем progress bar
-    const bar = root.querySelector('#sc-bar');
-    if (bar) bar.style.width = '0%';
-
-    renderLearn();
-  };
-}
 
     const searchEl = root.querySelector('#sc-search');
     if (searchEl) {
       searchEl.oninput = (event) => {
-        state.term = (event.target.value || '').trim();
+        state.term = event.target.value || '';
         rebuildQueue(true);
         if (state.mode === 'learn') renderLearn();
         else renderList();

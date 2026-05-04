@@ -786,7 +786,7 @@ function wait(ms) {
           }
           }
 
-          async function handleCreateCard(tr) {
+          async function handleCreateCard(tr, button) {
           const word = tr.querySelector('[data-field="word"]')?.value.trim() || '';
           const translation = tr.querySelector('[data-field="translation"]')?.value.trim() || '';
           const example = tr.querySelector('[data-field="example"]')?.value.trim() || '';
@@ -796,6 +796,9 @@ function wait(ms) {
           return;
           }
 
+          const original = startButtonFeedback(button, 'Creating...');
+
+          try {
           const nextOrder = state.cards.length ? Math.max(...state.cards.map((c) => Number(c.sort_order) || 0)) + 1 : 1;
           const { error } = await window.supabase
           .from('classroom_vocab_cards')
@@ -807,16 +810,21 @@ function wait(ms) {
           note: note || null,
           sort_order: nextOrder
           });
-          if (error) {
-          alert(error.message || 'Failed to create card.');
-          return;
-          }
+          if (error) throw error;
 
           await fetchCardsForActiveModule();
+          finishButtonFeedback(button, original, true, 'Created', 700);
+          await wait(700);
+          state.flash = { type: 'success', message: 'Card created.' };
           renderManage();
+          } catch (error) {
+          console.error('[teacher-cards] create card error:', error);
+          buttonError(button, original, 'Failed');
+          alert(error.message || 'Failed to create card.');
+          }
           }
 
-          async function handleSaveCard(tr) {
+          async function handleSaveCard(tr, button) {
           const id = tr.getAttribute('data-id');
           if (!id) return;
           const word = tr.querySelector('[data-field="word"]')?.value.trim() || '';
@@ -835,6 +843,9 @@ function wait(ms) {
           return;
           }
 
+          const original = startButtonFeedback(button, 'Saving...');
+
+          try {
           const { error } = await window.supabase
           .from('classroom_vocab_cards')
           .update({
@@ -846,13 +857,18 @@ function wait(ms) {
           })
           .eq('id', id)
           .eq('module_id', state.activeModuleId);
-          if (error) {
-          alert(error.message || 'Failed to save card.');
-          return;
-          }
+          if (error) throw error;
 
           await fetchCardsForActiveModule();
+          finishButtonFeedback(button, original, true, 'Saved', 700);
+          await wait(700);
+          state.flash = { type: 'success', message: 'Card saved. Example and note were updated.' };
           renderManage();
+          } catch (error) {
+          console.error('[teacher-cards] save card error:', error);
+          buttonError(button, original, 'Failed');
+          alert(error.message || 'Failed to save card.');
+          }
           }
 
           async function handleDeleteCard(id) {
@@ -1067,7 +1083,7 @@ tbody.addEventListener('click', async function (event) {
   const id = tr.getAttribute('data-id');
 
   if (act === 'save' && id) {
-    await handleSaveCard(tr);
+    await handleSaveCard(tr, btn);
     return;
   }
   if (act === 'delete' && id) {
@@ -1075,7 +1091,7 @@ tbody.addEventListener('click', async function (event) {
     return;
   }
   if (act === 'create') {
-    await handleCreateCard(tr);
+    await handleCreateCard(tr, btn);
     return;
   }
   if (act === 'cancel') {
