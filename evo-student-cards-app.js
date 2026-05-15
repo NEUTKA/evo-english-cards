@@ -835,8 +835,9 @@ function syncActiveAssignmentLocalProgress() {
       .eq('id', user.id)
       .single();
     if (studentErr) throw studentErr;
-    if (studentProfile.role !== 'student') throw new Error('Only student accounts can access this cards tab.');
-
+if (!['student', 'self_study'].includes(studentProfile.role)) {
+  throw new Error('Only learner accounts can access this cards tab.');
+}
     const { data: assignmentRows, error: assignmentsErr } = await supabase
       .from('classroom_vocab_assignments')
       .select('id, module_id, teacher_id, student_id, status, progress_percent, assigned_at, started_at, completed_at, last_opened_at, created_at, updated_at')
@@ -1306,8 +1307,10 @@ function renderLearn() {
             </div>
           `;
         }).join('')
-      : `<div class="sc-empty">No cards modules have been assigned yet.</div>`;
-
+: `<div class="sc-empty">
+    You don’t have a teacher yet.<br>
+    When a teacher adds your email, your vocabulary card modules will appear here.
+  </div>`;
     return `
       <div class="sc-card">
         <div class="sc-head">
@@ -1346,8 +1349,7 @@ function renderLearn() {
             <h1 class="sc-title">Welcome, ${escapeHtml(studentName)}</h1>
             <div class="sc-sub">Study vocabulary modules sent to you by your teacher.</div>
             <div class="sc-meta">
-              <div class="sc-pill">Role: student</div>
-              <div class="sc-pill">${state.assignments.length} module${state.assignments.length === 1 ? '' : 's'}</div>
+              <div class="sc-pill">Mode: student</div>              <div class="sc-pill">${state.assignments.length} module${state.assignments.length === 1 ? '' : 's'}</div>
               <div class="sc-pill">${escapeHtml(studentEmail)}</div>
             </div>
           </div>
