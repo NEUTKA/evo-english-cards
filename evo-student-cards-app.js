@@ -32,6 +32,15 @@
 let scRealtimeTimer = null;
 let scRealtimeBusy = false;
 
+function trackEvent(eventName, params = {}) {
+  try {
+    window.EvoAnalytics?.track?.(eventName, {
+      app: 'student_cards',
+      ...params
+    });
+  } catch (_) {}
+}
+
 function clearStudentCardsRealtime() {
   if (scRealtimeTimer) {
     window.clearTimeout(scRealtimeTimer);
@@ -997,14 +1006,17 @@ async function fetchCardsAndProgress() {
 function renderCompletion(content, bar) {
   clearStudentCardsKeydown();
   bar.style.width = '100%';
+  const moduleTitle = getActiveAssignment()?.module?.title || 'this module';
+  const total = state.baseIds.length;
 
   if (!state.hasCelebrated) {
     celebrate();
     state.hasCelebrated = true;
+    trackEvent('complete_card_module', {
+      assignment_id: state.activeAssignmentId,
+      total_cards: total
+    });
   }
-
-  const moduleTitle = getActiveAssignment()?.module?.title || 'this module';
-  const total = state.baseIds.length;
 
   content.innerHTML = `
     <div class="sc-complete-card">
@@ -1134,6 +1146,13 @@ function renderLearn() {
     state.known.add(cardId);
     saveSessionKnown();
     moveToNextCard();
+    trackEvent('vocab_card_known', {
+      source: 'student_assigned_cards',
+      assignment_id: state.activeAssignmentId,
+      module_id: getActiveAssignment()?.module_id || '',
+      progress_count: getKnownCountForBaseIds(),
+      total_cards: state.baseIds.length
+    });
 
     state.actionBusy = false;
     renderLearn();
@@ -1148,6 +1167,12 @@ function renderLearn() {
     // “Don't know” is only a practice navigation action.
     // It does not save anything and does not show a misleading “Saved” status.
     moveToNextCard();
+    trackEvent('vocab_card_unknown', {
+      source: 'student_assigned_cards',
+      assignment_id: state.activeAssignmentId,
+      module_id: getActiveAssignment()?.module_id || '',
+      total_cards: state.baseIds.length
+    });
 
     state.actionBusy = false;
     renderLearn();
@@ -1426,6 +1451,10 @@ function renderLearn() {
         state.term = '';
         state.filterStarred = false;
         await fetchCardsAndProgress();
+        trackEvent('open_card_module', {
+          assignment_id: assignmentId,
+          module_id: getActiveAssignment()?.module_id || ''
+        });
         renderApp();
       };
     });
@@ -1451,6 +1480,11 @@ function renderLearn() {
         const original = startButtonFeedback(shuffleBtn, 'Shuffling...');
         shuffleFilteredCards();
         await finishButtonFeedback(shuffleBtn, original, true, 'Shuffled', 420);
+        trackEvent('vocab_shuffle', {
+          source: 'student_assigned_cards',
+          assignment_id: state.activeAssignmentId,
+          total_cards: state.baseIds.length
+        });
         renderLearn();
         showMiniStatus('Cards shuffled. Practice starts from the first card.');
       };

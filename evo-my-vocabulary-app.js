@@ -93,6 +93,15 @@
     return `cards.activeModuleId:${userId}:${scope}`;
   }
 
+  function trackEvent(eventName, params = {}) {
+    try {
+      window.EvoAnalytics?.track?.(eventName, {
+        app: 'my_vocabulary',
+        ...params
+      });
+    } catch (_) {}
+  }
+
   function createApp(root) {
     const state = {
       root,
@@ -276,6 +285,13 @@
     function markKnownAndAdvance() {
       const c = state.queue[state.idx];
       if (c) state.known.add(c.id);
+      if (c) {
+        trackEvent('vocab_card_known', {
+          module_id: state.activeModuleId,
+          progress_count: state.known.size,
+          total_cards: state.baseIds.length
+        });
+      }
       state.flipped = false;
 
       if (state.baseIds.length && state.known.size >= state.baseIds.length) {
@@ -345,6 +361,10 @@
       try { localStorage.setItem(storageKey(state.user.id, root), data.id); } catch (_) {}
       await fetchCards();
       render();
+      trackEvent('create_card_module', {
+        module_id: data.id,
+        module_count: state.modules.length
+      });
     }
 
     async function renameModule() {
@@ -383,6 +403,12 @@
       if (!word || !translation) return showFlash('error', 'Add word and translation.');
       try {
         await saveWordToActiveModule({ word, translation });
+        trackEvent('create_card', {
+          source: 'my_vocabulary_form',
+          module_id: state.activeModuleId,
+          word_length: word.length,
+          has_translation: !!translation
+        });
         showFlash('success', 'Card added.');
       } catch (err) {
         showFlash('error', err?.message || 'Could not add card.');
@@ -576,6 +602,10 @@
       root.querySelectorAll('[data-evc-mode]').forEach((btn) => {
         btn.onclick = () => {
           state.mode = btn.getAttribute('data-evc-mode') || 'learn';
+          trackEvent('vocab_mode_changed', {
+            mode: state.mode,
+            module_id: state.activeModuleId
+          });
           render();
         };
       });
@@ -589,13 +619,32 @@
             if (action === 'delete-module') return deleteModule();
             if (action === 'add-card') return createCardFromForm();
             if (action === 'filter-starred') { state.filterStarred = !state.filterStarred; rebuildQueue(true); return render(); }
-            if (action === 'shuffle') { shuffleQueue(); return renderContentOnly(); }
+            if (action === 'shuffle') {
+              trackEvent('vocab_shuffle', {
+                module_id: state.activeModuleId,
+                total_cards: state.baseIds.length
+              });
+              shuffleQueue();
+              return renderContentOnly();
+            }
             if (action === 'restart') { rebuildQueue(true); return renderContentOnly(); }
             if (action === 'flip') { state.flipped = !state.flipped; return renderContentOnly(); }
             if (action === 'prev') { state.idx = Math.max(0, state.idx - 1); state.flipped = false; return renderContentOnly(); }
             if (action === 'next') { state.idx = Math.min(state.queue.length - 1, state.idx + 1); state.flipped = false; return renderContentOnly(); }
             if (action === 'know') { return markKnownAndAdvance(); }
-            if (action === 'dont-know') { const c = state.queue[state.idx]; if (c) state.queue.push(c); if (state.idx < state.queue.length - 1) state.idx += 1; state.flipped = false; return renderContentOnly(); }
+            if (action === 'dont-know') {
+              const c = state.queue[state.idx];
+              if (c) {
+                trackEvent('vocab_card_unknown', {
+                  module_id: state.activeModuleId,
+                  total_cards: state.baseIds.length
+                });
+                state.queue.push(c);
+              }
+              if (state.idx < state.queue.length - 1) state.idx += 1;
+              state.flipped = false;
+              return renderContentOnly();
+            }
             if (action === 'star') return toggleStar(el.getAttribute('data-card-id'));
             if (action === 'save-row') return updateCard(el.closest('tr'));
             if (action === 'delete-row') return deleteCard(el.closest('tr')?.getAttribute('data-card-id'));

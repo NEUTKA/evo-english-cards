@@ -28,6 +28,15 @@ let tcRealtimeChannel = null;
 let tcRealtimeTimer = null;
 let tcRealtimeBusy = false;
 
+function trackEvent(eventName, params = {}) {
+  try {
+    window.EvoAnalytics?.track?.(eventName, {
+      app: 'teacher_cards',
+      ...params
+    });
+  } catch (_) {}
+}
+
 function clearTeacherCardsRealtime() {
   if (tcRealtimeTimer) {
     window.clearTimeout(tcRealtimeTimer);
@@ -670,6 +679,11 @@ function wait(ms) {
           state.activeModuleId = data.id;
           await reloadAll();
           showFlash('success', 'Cards module created successfully.');
+          trackEvent('create_card_module', {
+          source: 'teacher_cards',
+          module_id: data.id,
+          module_count: state.modules.length
+          });
           }
 
           async function handleRenameModule() {
@@ -748,6 +762,10 @@ function wait(ms) {
           state.flash = { type: 'success', message: 'Cards module was sent successfully.' };
           renderApp();
           finishButtonFeedbackBySelector('#tc-send-module', original, true, 'Sent');
+          trackEvent('assign_card_module', {
+          source: 'teacher_cards',
+          module_id: moduleId
+          });
           } catch (err) {
           console.error('[teacher-cards] assign module error:', err);
           state.flash = { type: 'error', message: err?.message || 'Failed to send cards module.' };
@@ -817,6 +835,14 @@ function wait(ms) {
           await wait(700);
           state.flash = { type: 'success', message: 'Card created.' };
           renderManage();
+          trackEvent('create_card', {
+          source: 'teacher_cards',
+          module_id: state.activeModuleId,
+          word_length: word.length,
+          has_translation: !!translation,
+          has_example: !!example,
+          has_note: !!note
+          });
           } catch (error) {
           console.error('[teacher-cards] create card error:', error);
           buttonError(button, original, 'Failed');
